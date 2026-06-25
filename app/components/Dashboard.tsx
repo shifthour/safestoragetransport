@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { OptimizationResult } from "@/lib/types";
 import { Diagnostics } from "@/lib/diagnostics";
 import { filterByScope, countByCategory, timeRequests, Scope } from "@/lib/filter";
-import Sidebar from "./Sidebar";
+import { SessionUser } from "@/lib/auth";
+import AppShell from "./AppShell";
 import { KpiCards, SavingsPanel, ObligationPanel, UtilizationPanel } from "./Panels";
 import AssignmentBoard from "./AssignmentBoard";
 import DiagnosticsPanel from "./Diagnostics";
@@ -12,13 +13,12 @@ import RouteMap from "./RouteMap";
 import Timeline from "./Timeline";
 import StatusBoard from "./StatusBoard";
 import Profitability from "./Profitability";
-import ModuleTabs from "./ModuleTabs";
 import { Card } from "./ui";
 
 type Tab = "overview" | "timeline" | "assignments" | "map" | "confirmations" | "pnl" | "savings";
 
 export default function Dashboard({
-  result, source, dateLabel, mode, diagnostics, activeSource, cities, dates, activeCity, activeDate,
+  result, source, dateLabel, mode, diagnostics, activeSource, cities, dates, activeCity, activeDate, user = null,
 }: {
   result: OptimizationResult;
   source: "live" | "sample" | "real";
@@ -31,6 +31,7 @@ export default function Dashboard({
   activeCity?: string;
   activeDate?: string;
   precisePins?: number;
+  user?: SessionUser | null;
 }) {
   const counts = countByCategory(result);
   const total = counts.pickup + counts.full_retrieval + counts.partial_retrieval;
@@ -58,12 +59,7 @@ export default function Dashboard({
   ];
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      <Sidebar active="pr" />
-
-      {/* ── Module content: Pickup & Retrieval ──────────────────────── */}
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
-        <ModuleTabs active="dashboard" />
+    <AppShell active="history" user={user}>
         <div className="mb-4">
           <h1 className="text-lg font-bold text-slate-900">Old schedules</h1>
           <p className="text-xs text-slate-500">Browse any city &amp; date · {result.city} · {dateLabel} · {total} orders</p>
@@ -153,7 +149,6 @@ export default function Dashboard({
             </div>
           )}
         </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }

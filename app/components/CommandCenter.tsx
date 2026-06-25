@@ -2,16 +2,18 @@
 
 import { CitySummary } from "@/lib/types";
 import { money, km, pct } from "@/lib/format";
+import { SessionUser } from "@/lib/auth";
 import { Card, Bar } from "./ui";
-import Sidebar from "./Sidebar";
+import AppShell from "./AppShell";
 
 export default function CommandCenter({
-  summaries, dateLabel, dates, activeDate,
+  summaries, dateLabel, dates, activeDate, user,
 }: {
   summaries: CitySummary[];
   dateLabel: string;
   dates: { date: string; count: number }[];
   activeDate: string;
+  user: SessionUser | null;
 }) {
   const tot = summaries.reduce(
     (a, s) => ({
@@ -33,9 +35,7 @@ export default function CommandCenter({
   ];
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      <Sidebar active="admin" />
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
+    <AppShell active="admin" user={user}>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-lg font-bold text-slate-900">Command Center</h1>
@@ -118,7 +118,6 @@ export default function CommandCenter({
       <footer className="mt-10 border-t border-slate-200 pt-4 text-xs text-slate-400">
         Click a city to open its live allocation. Cost is the optimiser&apos;s estimate using default vendor attributes until the vendor master (depot, tier, rate, vehicle) is wired.
       </footer>
-      </main>
-    </div>
+    </AppShell>
   );
 }

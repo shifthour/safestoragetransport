@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { VendorMaster } from "@/lib/vendors";
 import { money } from "@/lib/format";
 import { Card } from "./ui";
-import Sidebar from "./Sidebar";
-import ModuleTabs from "./ModuleTabs";
+import { SessionUser } from "@/lib/auth";
+import AppShell from "./AppShell";
 
 const VEHICLE_LABEL: Record<string, string> = { "14ft": "14ft · 7 pallets", "10ft": "10ft · 4 pallets", others: "Other · 7 pallets" };
 const TIER_BADGE: Record<string, string> = {
@@ -14,7 +14,7 @@ const TIER_BADGE: Record<string, string> = {
 };
 const TIER_LABEL: Record<string, string> = { general: "General", non_general: "Non-general" };
 
-export default function VendorPanel({ initial, source }: { initial: VendorMaster[]; source: "supabase" | "seed" }) {
+export default function VendorPanel({ initial, source, user }: { initial: VendorMaster[]; source: "supabase" | "seed"; user: SessionUser | null }) {
   const [vendors, setVendors] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -86,10 +86,7 @@ export default function VendorPanel({ initial, source }: { initial: VendorMaster
   }
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      <Sidebar active="pr" />
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
-        <ModuleTabs active="vendors" />
+    <AppShell active="vendors" user={user}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-slate-900">Vendor panel</h1>
@@ -185,8 +182,7 @@ export default function VendorPanel({ initial, source }: { initial: VendorMaster
           </div>
         </Card>
         <p className="mt-3 text-xs text-slate-400">Click a row to see supervisor, driver, packers &amp; vehicle. Click the Intercity cell to toggle. Edits are saved &amp; shared.</p>
-      </main>
-    </div>
+    </AppShell>
   );
 }
 

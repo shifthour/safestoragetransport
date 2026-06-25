@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScheduleData } from "@/lib/schedule";
 import { money } from "@/lib/format";
-import Sidebar from "./Sidebar";
-import ModuleTabs from "./ModuleTabs";
+import { SessionUser } from "@/lib/auth";
+import AppShell from "./AppShell";
 import ScheduleCityView from "./ScheduleCityView";
 import { Card } from "./ui";
 
@@ -41,7 +41,7 @@ function agg(cities: ScheduleData[]) {
 
 // Shared all-cities schedule view. The Schedule tab uses it for TOMORROW; the Old-schedules tab
 // uses the SAME view with a date picker over every persisted date. Identical content either way.
-export default function ScheduleBoard({ mode }: { mode: "tomorrow" | "history" }) {
+export default function ScheduleBoard({ mode, user }: { mode: "tomorrow" | "history"; user: SessionUser | null }) {
   const [data, setData] = useState<{ date: string; cities: ScheduleData[] } | null>(null);
   const [dates, setDates] = useState<{ date: string; runs: number; orders: number }[]>([]); // history only
   const [selDate, setSelDate] = useState<string | undefined>(undefined);
@@ -103,11 +103,7 @@ export default function ScheduleBoard({ mode }: { mode: "tomorrow" | "history" }
   const isHistory = mode === "history";
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
-      <Sidebar active="pr" />
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
-        <ModuleTabs active={isHistory ? "dashboard" : "schedule"} />
-
+    <AppShell active={isHistory ? "history" : "schedule"} user={user}>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-lg font-bold text-slate-900">{isHistory ? "Old schedules" : "Tomorrow's schedule"}</h1>
@@ -230,7 +226,6 @@ export default function ScheduleBoard({ mode }: { mode: "tomorrow" | "history" }
             ))}
           </div>
         )}
-      </main>
-    </div>
+    </AppShell>
   );
 }

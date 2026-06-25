@@ -9,6 +9,7 @@ import { optimize } from "./optimizer";
 import { computePnL } from "./economics";
 import { getPackingPerPallet } from "./settings";
 import { REGION } from "./config";
+import { buildVendorPlan, VendorPlan } from "./dayplan";
 import { Booking } from "./types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -110,6 +111,7 @@ export interface ScheduleVendor {
   vehicleNo?: string | null; vehicleType?: string | null; startingPoint?: string | null; depotLat?: number | null; depotLng?: number | null;
   orders: ScheduleOrder[]; pallets: number; actualPallets: number; revenue: number; resources: number; extraTrips: number; tripCount: number;
   vendorNotifiedAt?: string | null;
+  plan?: VendorPlan; // server-computed day plan (real OSRM travel times)
 }
 export interface AvailableVendor { id: string; name: string; vehicleType: string; tier: string }
 export interface ScheduleData {
@@ -185,6 +187,9 @@ export async function loadSchedule(citySlug: string, date: string): Promise<Sche
   const vendors = [...byVendor.values()]
     .map((v) => ({ ...v, pallets: Math.round(v.pallets * 10) / 10, actualPallets: Math.round(v.actualPallets * 10) / 10, tripCount: new Set(v.orders.map((o) => o.trip_no)).size }))
     .sort((a, b) => (a.isUnassigned ? 1 : 0) - (b.isUnassigned ? 1 : 0)); // unassigned last
+  // Attach the realistic day plan (real road travel via OSRM) to each assigned vendor.
+  await Promise.all(vendors.map(async (v) => { if (!v.isUnassigned) v.plan = await buildVendorPlan(v); }));
+
   const totalResources = vendors.reduce((s, v) => s + (v.resources || 0), 0);
   const totalExtraTrips = vendors.reduce((s, v) => s + (v.extraTrips || 0), 0);
   const addOnCost = totalResources * resourceCost + totalExtraTrips * extraTripCost;
