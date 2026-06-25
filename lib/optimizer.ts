@@ -152,9 +152,10 @@ export function optimize(date: string, city: string, bookings: Booking[], vendor
     assignedTo.set(v.id, []);
     reasoning.set(v.id, []);
   });
-  // Intercity retrievals are NOT auto-assigned — the team assigns these by hand. They stay
-  // unassigned (and surface in the schedule's "team to assign" bucket).
-  const teamAssigns = (b: Booking) => !!b.isIntercity && b.type === "retrieval";
+  // Intercity orders (pickup AND retrieval) are NEVER auto-assigned to a regular vendor — they must
+  // not mix with local orders. They stay out of allocation and surface in the schedule's "team to
+  // assign" bucket at the very end, where the team picks an intercity vendor by hand.
+  const teamAssigns = (b: Booking) => !!b.isIntercity;
   const manualUnassigned = bookings.filter(teamAssigns).map((b) => b.id);
   const remaining = new Set(bookings.filter((b) => !teamAssigns(b)).map((b) => b.id));
   const byId = new Map(bookings.map((b) => [b.id, b]));

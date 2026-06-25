@@ -164,7 +164,10 @@ export async function loadSchedule(citySlug: string, date: string): Promise<Sche
   (assigns ?? []).sort((a: any, b: any) => a.trip_no - b.trip_no || a.stop_seq - b.stop_seq).forEach((a: any) => {
     const o: any = orderById.get(a.order_id);
     if (!o) return;
-    const unassigned = !a.vendor_id && !a.vendor_name; // null-vendor row = team to assign
+    // An intercity order must never sit under a regular vendor — if a stale assignment put it there,
+    // surface it in the "team to assign" bucket (at the end) instead of mixing with local orders.
+    const vendorIsIntercity = a.vendor_id ? !!(vById.get(a.vendor_id) as any)?.is_intercity_vendor : false;
+    const unassigned = (!a.vendor_id && !a.vendor_name) || (o.is_intercity && !vendorIsIntercity);
     const key = unassigned ? UNASSIGNED_KEY : (a.vendor_id ?? a.vendor_name);
     const sv = ensureVendor(key, () => {
       if (unassigned) return { vendorId: null, vendorName: "Unassigned — team to assign", isUnassigned: true, orders: [], pallets: 0, actualPallets: 0, revenue: 0, resources: 0, extraTrips: 0, tripCount: 0, vendorNotifiedAt: null };
