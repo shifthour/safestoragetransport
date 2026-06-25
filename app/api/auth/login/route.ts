@@ -11,11 +11,15 @@ export async function POST(req: NextRequest) {
   const { email, password } = await req.json().catch(() => ({}));
   if (!email || !password) return NextResponse.json({ ok: false, error: "Email and password are required" }, { status: 400 });
 
-  const { data: user } = await db()
+  const { data: user, error } = await db()
     .from("transport_users")
     .select("id, email, name, role, password_hash, active")
     .ilike("email", String(email).trim())
     .maybeSingle();
+
+  // A DB/config problem (e.g. table missing from PostgREST's schema cache) must NOT masquerade as a
+  // bad password — surface it so it's diagnosable instead of an endless "invalid password".
+  if (error) return NextResponse.json({ ok: false, error: `db: ${error.message}` }, { status: 500 });
 
   // Same response whether the user is missing or the password is wrong (don't leak which).
   if (!user || !user.active || !verifyPassword(String(password), user.password_hash)) {
