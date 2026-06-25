@@ -122,6 +122,7 @@ export interface NewVendorInput {
   vehicleName?: string | null;
   systemTeamNo?: string | null;
   remarks?: string | null;
+  securityDeposit?: number | null;
 }
 
 const blank = (s?: string | null) => (s && s.trim() ? s.trim() : null);
@@ -158,6 +159,7 @@ export async function addVendor(input: NewVendorInput): Promise<VendorMaster> {
       packer_names: blank(input.packerNames),
       vehicle_no: blank(input.vehicleNo), vehicle_name: blank(input.vehicleName),
       system_team_no: blank(input.systemTeamNo), remarks: blank(input.remarks),
+      security_deposit: input.securityDeposit ?? null,
       source: "panel",
     };
     const { data, error } = await c.from(TABLE).insert(row).select().single();
@@ -229,6 +231,7 @@ async function fallbackAdd(input: NewVendorInput): Promise<VendorMaster> {
     driverName: blank(input.driverName), driverContact: blank(input.driverContact),
     packerNames: blank(input.packerNames), vehicleNo: blank(input.vehicleNo),
     systemTeamNo: blank(input.systemTeamNo),
+    securityDeposit: input.securityDeposit ?? null, serviceAgreementUrl: null, gstDocumentUrl: null,
     active: true, source: "panel",
   };
   o.added.push(v); await writeOverlay(o); return v;

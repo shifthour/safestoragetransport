@@ -394,13 +394,25 @@ function EditForm({ v, onSaved, onCancel }: { v: VendorMaster; onSaved: (v: Vend
 }
 
 const EMPTY = {
-  city: "", name: "", vehicleType: "14ft", tier: "general", startingPoint: "", dailyPrice: "", pricingNote: "",
+  city: "", name: "", vehicleType: "14ft", tier: "general", startingPoint: "", dailyPrice: "", pricingNote: "", securityDeposit: "",
   supervisorName: "", supervisorContact: "", driverName: "", driverContact: "", packerNames: "",
   vehicleNo: "", vehicleName: "", systemTeamNo: "", remarks: "", isIntercityVendor: false,
 };
 
+// shared with EditForm: push a file to Blob for a vendor and return its URL
+async function uploadDoc(vendorId: string, kind: "service_agreement" | "gst", file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append("file", file); fd.append("vendorId", vendorId); fd.append("kind", kind);
+  const r = await fetch("/api/vendors/upload", { method: "POST", body: fd });
+  const j = await r.json();
+  if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
+  return j.url as string;
+}
+
 function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
   const [f, setF] = useState({ ...EMPTY });
+  const [saFile, setSaFile] = useState<File | null>(null);
+  const [gstFile, setGstFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
@@ -408,11 +420,20 @@ function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
   async function submit() {
     if (!f.city || !f.name) { setErr("City and vendor name are required"); return; }
     setSaving(true); setErr("");
-    const res = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
-    setSaving(false);
-    if (!res.ok) { setErr("Could not save"); return; }
-    const { vendor } = await res.json();
-    onAdded(vendor);
+    try {
+      const res = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+      if (!res.ok) throw new Error("Could not save vendor");
+      const { vendor } = await res.json();
+      // documents need the new vendor's id, so upload after creation
+      let sa: string | null = null, gst: string | null = null;
+      if (saFile) sa = await uploadDoc(vendor.id, "service_agreement", saFile);
+      if (gstFile) gst = await uploadDoc(vendor.id, "gst", gstFile);
+      onAdded({ ...vendor, serviceAgreementUrl: sa, gstDocumentUrl: gst });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   const input = "w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm";
@@ -450,6 +471,21 @@ function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
         {field("Starting point (locality)", "startingPoint", "text", "e.g. Akshaya Nagar")}
         {field("Daily price (₹)", "dailyPrice", "number", "e.g. 7500")}
         {field("Pricing note (for non-general)", "pricingNote", "text", "e.g. 6 transactions / ₹20,000")}
+        {field("Security deposit (₹)", "securityDeposit", "number", "e.g. 25000")}
+      </div>
+
+      <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Documents</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium text-slate-500">Service agreement</span>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setSaFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
+          {saFile && <span className="mt-1 block text-[11px] text-emerald-600">{saFile.name}</span>}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium text-slate-500">GST document</span>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setGstFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
+          {gstFile && <span className="mt-1 block text-[11px] text-emerald-600">{gstFile.name}</span>}
+        </label>
       </div>
 
       <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Team &amp; vehicle</div>

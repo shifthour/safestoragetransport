@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     vehicleName: body.vehicleName || null,
     systemTeamNo: body.systemTeamNo || null,
     remarks: body.remarks || null,
+    securityDeposit: body.securityDeposit != null && body.securityDeposit !== "" ? Number(body.securityDeposit) : null,
   });
   return NextResponse.json({ vendor });
 }
