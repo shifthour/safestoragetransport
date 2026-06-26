@@ -116,10 +116,20 @@ function TimelineBar({ plan }: { plan: any }) {
   );
 }
 
-// ── Route map: depot → stops (visit order) → warehouse on a real street map ─────────────────────
+// ── Route map: depot → stops (visit order) → warehouse, following real roads ────────────────────
+function shortWh(name: any) { return name ? String(name).split(/[·,]/)[0].trim() : "Warehouse"; }
+
 function RouteMapMini({ v }: { v: any }) {
   const elRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+
+  const depot = v.depotLat != null && v.depotLng != null ? { lat: Number(v.depotLat), lng: Number(v.depotLng), label: v.startingPoint || "Depot" } : null;
+  const whSrc = v.orders.find((o: any) => o.warehouse_lat && o.warehouse_lng);
+  const wh = whSrc ? { lat: Number(whSrc.warehouse_lat), lng: Number(whSrc.warehouse_lng), name: shortWh(whSrc.warehouse_name) } : null;
+  const stops = [...v.orders]
+    .filter((o: any) => o.lat && o.lng)
+    .sort((a: any, b: any) => (v.plan?.byOrder?.[a.customer_unique_id]?.arrive ?? a.stop_seq ?? 0) - (v.plan?.byOrder?.[b.customer_unique_id]?.arrive ?? b.stop_seq ?? 0));
+  const hasPick = stops.some((o: any) => o.order_type === "pickup");
 
   useEffect(() => {
     let cancelled = false;
@@ -131,49 +141,94 @@ function RouteMapMini({ v }: { v: any }) {
       mapRef.current = map;
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, subdomains: "abc" }).addTo(map);
 
-      const depot = v.depotLat != null && v.depotLng != null ? { lat: Number(v.depotLat), lng: Number(v.depotLng) } : null;
-      const whSrc = v.orders.find((o: any) => o.warehouse_lat && o.warehouse_lng);
-      const wh = whSrc ? { lat: Number(whSrc.warehouse_lat), lng: Number(whSrc.warehouse_lng), name: whSrc.warehouse_name } : null;
-      // stops in visit order (planned arrival)
-      const stops = [...v.orders]
-        .filter((o: any) => o.lat && o.lng)
-        .sort((a: any, b: any) => (v.plan?.byOrder?.[a.customer_unique_id]?.arrive ?? a.stop_seq ?? 0) - (v.plan?.byOrder?.[b.customer_unique_id]?.arrive ?? b.stop_seq ?? 0));
+      // ordered waypoints: depot → stops → warehouse (drop pickups at the end)
+      const wps: { lat: number; lng: number }[] = [];
+      if (depot) wps.push(depot);
+      stops.forEach((o: any) => wps.push({ lat: Number(o.lat), lng: Number(o.lng) }));
+      if (wh && hasPick) wps.push(wh);
 
-      const bounds: [number, number][] = [];
-      const path: [number, number][] = [];
-      if (depot) {
-        bounds.push([depot.lat, depot.lng]); path.push([depot.lat, depot.lng]);
-        L.marker([depot.lat, depot.lng], { icon: L.divIcon({ className: "", html: `<div style="background:#1e293b;color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;white-space:nowrap;transform:translate(-50%,-130%)">▶ Start</div>`, iconSize: [0, 0] }) }).addTo(map);
-      }
+      const pill = (bg: string, text: string) => L.divIcon({ className: "", html: `<div style="background:${bg};color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35);transform:translate(-50%,-140%)">${text}</div>`, iconSize: [0, 0] });
+
+      if (depot) L.marker([depot.lat, depot.lng], { icon: pill("#16a34a", "▶ START") }).addTo(map).bindPopup(`<b>Start</b><br>${depot.label}`);
       stops.forEach((o: any, i: number) => {
-        const lat = Number(o.lat), lng = Number(o.lng);
-        bounds.push([lat, lng]); path.push([lat, lng]);
         const color = o.order_type === "pickup" ? "#2563eb" : "#059669";
-        L.marker([lat, lng], { icon: L.divIcon({ className: "", html: `<div style="background:${color};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }) })
-          .addTo(map).bindPopup(`<b>${o.customer_unique_id}</b> · ${o.order_type === "pickup" ? "Pickup" : "Retrieval"}<br>${o.customer_name}${o.locality ? `<br>${o.locality}` : ""}`);
+        const t = v.plan?.byOrder?.[o.customer_unique_id]?.arrive;
+        L.marker([Number(o.lat), Number(o.lng)], { icon: L.divIcon({ className: "", html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)">${i + 1}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }) })
+          .addTo(map).bindPopup(`<b>${i + 1}. ${o.customer_unique_id}</b> — ${o.order_type === "pickup" ? "Pickup" : "Retrieval"}<br>${o.customer_name}${o.locality ? `<br>${o.locality}` : ""}${t != null ? `<br>~${fmtClock(t)}` : ""}`);
       });
-      if (wh) {
-        bounds.push([wh.lat, wh.lng]); path.push([wh.lat, wh.lng]);
-        L.marker([wh.lat, wh.lng], { icon: L.divIcon({ className: "", html: `<div style="background:#0f172a;color:#fff;font-size:10px;font-weight:600;padding:3px 7px;border-radius:5px;white-space:nowrap;transform:translate(-50%,-130%)">⌂ ${wh.name ?? "Warehouse"}</div>`, iconSize: [0, 0] }) }).addTo(map);
+      if (wh) L.marker([wh.lat, wh.lng], { icon: pill("#0f172a", `⌂ ${wh.name}`) }).addTo(map).bindPopup(`<b>Warehouse</b><br>${wh.name}`);
+
+      // draw the ACTUAL road route (OSRM geometry); fall back to a straight dashed line.
+      let drew = false;
+      if (wps.length > 1) {
+        try {
+          const coordStr = wps.map((p) => `${p.lng},${p.lat}`).join(";");
+          const ctrl = new AbortController();
+          const to = setTimeout(() => ctrl.abort(), 4000);
+          const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`, { signal: ctrl.signal });
+          clearTimeout(to);
+          const j: any = await res.json();
+          if (!cancelled && j?.code === "Ok" && j.routes?.[0]?.geometry?.coordinates) {
+            const line = j.routes[0].geometry.coordinates.map((c: number[]) => [c[1], c[0]] as [number, number]);
+            L.polyline(line, { color: "#4f46e5", weight: 5, opacity: 0.85 }).addTo(map);
+            drew = true;
+          }
+        } catch { /* fall back below */ }
       }
-      if (path.length > 1) L.polyline(path, { color: "#6366f1", weight: 3, opacity: 0.7, dashArray: "6 6" }).addTo(map);
-      if (bounds.length > 1) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 });
+      if (!cancelled && !drew && wps.length > 1) {
+        L.polyline(wps.map((p) => [p.lat, p.lng] as [number, number]), { color: "#94a3b8", weight: 3, opacity: 0.7, dashArray: "6 6" }).addTo(map);
+      }
+
+      const bounds = wps.map((p) => [p.lat, p.lng] as [number, number]);
+      if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
       else if (bounds.length === 1) map.setView(bounds[0], 12);
       else map.setView([12.95, 77.6], 11);
     })();
     return () => { cancelled = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
-  }, [v]);
+  }, [v]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasCoords = v.orders.some((o: any) => o.lat && o.lng) || (v.depotLat && v.depotLng);
+  const hasCoords = stops.length > 0 || depot;
   if (!hasCoords) return <div className="py-6 text-center text-xs text-slate-400">No map coordinates for this vendor&apos;s stops.</div>;
+
   return (
-    <div>
-      <div ref={elRef} className="h-72 w-full overflow-hidden rounded-lg border border-slate-200" />
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-600" /> retrieval drop</span>
-        <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-600" /> pickup</span>
-        <span>numbers = visit order · dashed line = route · ⌂ warehouse</span>
+    <div className="grid gap-3 lg:grid-cols-[1.6fr_1fr]">
+      <div>
+        <div ref={elRef} className="h-72 w-full overflow-hidden rounded-lg border border-slate-200" />
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-green-600" /> start</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-600" /> retrieval drop</span>
+          <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-blue-600" /> pickup</span>
+          <span className="flex items-center gap-1"><span className="h-1 w-4 rounded bg-indigo-600" /> driving route</span>
+        </div>
       </div>
+      {/* readable itinerary so the order is obvious without reading the map */}
+      <ol className="space-y-1 text-xs">
+        <li className="flex items-center gap-2 rounded-md bg-green-50 px-2 py-1.5">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green-600 text-[10px] font-bold text-white">▶</span>
+          <span className="font-medium text-slate-700">Start · {depot?.label ?? "depot"}</span>
+        </li>
+        {stops.map((o: any, i: number) => {
+          const t = v.plan?.byOrder?.[o.customer_unique_id]?.arrive;
+          const late = v.plan?.byOrder?.[o.customer_unique_id]?.late;
+          const color = o.order_type === "pickup" ? "bg-blue-600" : "bg-emerald-600";
+          return (
+            <li key={o.customer_unique_id + i} className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
+              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${color}`}>{i + 1}</span>
+              <span className="min-w-0">
+                <span className="font-semibold text-slate-800">{o.customer_unique_id}</span> <span className="text-slate-600">{o.customer_name}</span>
+                <span className="ml-1 text-slate-400">{o.order_type === "pickup" ? "pickup" : "retrieval"}</span>
+                <div className="text-[11px] text-slate-400">{o.locality || ""}{t != null ? ` · ~${fmtClock(t)}` : ""}{late ? <span className="ml-1 font-medium text-red-500">LATE</span> : null}</div>
+              </span>
+            </li>
+          );
+        })}
+        {wh && hasPick && (
+          <li className="flex items-center gap-2 rounded-md bg-slate-100 px-2 py-1.5">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[10px] font-bold text-white">⌂</span>
+            <span className="font-medium text-slate-700">Drop pickups · {wh.name}</span>
+          </li>
+        )}
+      </ol>
     </div>
   );
 }
