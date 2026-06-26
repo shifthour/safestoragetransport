@@ -8,17 +8,18 @@ import { SessionUser } from "@/lib/auth";
 import AppShell from "./AppShell";
 
 const VEHICLE_LABEL: Record<string, string> = { "14ft": "14ft · 7 pallets", "10ft": "10ft · 4 pallets", others: "Other · 7 pallets" };
-const TIER_BADGE: Record<string, string> = {
-  general: "bg-blue-50 text-blue-700 ring-blue-200",
-  non_general: "bg-amber-50 text-amber-700 ring-amber-200",
-};
+const TIER_BADGE: Record<string, string> = { general: "bg-blue-50 text-blue-700 ring-blue-200", non_general: "bg-amber-50 text-amber-700 ring-amber-200" };
 const TIER_LABEL: Record<string, string> = { general: "General", non_general: "Non-general" };
+const PRIORITY_BADGE: Record<string, string> = { A: "bg-emerald-100 text-emerald-700", B: "bg-amber-100 text-amber-700", C: "bg-slate-100 text-slate-600" };
+
+type Sup = { name: string; phone: string };
+const primarySup = (v: VendorMaster): Sup | null =>
+  (v.supervisors && v.supervisors[0]) || (v.supervisorName ? { name: v.supervisorName, phone: v.supervisorContact || "" } : null);
 
 export default function VendorPanel({ initial, source, user }: { initial: VendorMaster[]; source: "supabase" | "seed"; user: SessionUser | null }) {
   const [vendors, setVendors] = useState(initial);
   const [busy, setBusy] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  // One expanded row at a time, in one of three modes.
   const [exp, setExp] = useState<{ id: string; mode: "details" | "compliance" | "edit" } | null>(null);
   const toggle = (id: string, mode: "details" | "compliance" | "edit") =>
     setExp((e) => (e && e.id === id && e.mode === mode ? null : { id, mode }));
@@ -31,15 +32,14 @@ export default function VendorPanel({ initial, source, user }: { initial: Vendor
 
   const stats = {
     total: shown.length,
+    active: shown.filter((v) => v.active !== false).length,
     general: shown.filter((v) => v.tier === "general").length,
-    nonGeneral: shown.filter((v) => v.tier === "non_general").length,
     intercity: shown.filter((v) => v.isIntercityVendor).length,
     dailyCost: shown.reduce((s, v) => s + (v.dailyPrice || 0), 0),
     cities: new Set(shown.map((v) => v.city)).size,
   };
 
-  // Column sorting
-  type SortKey = "city" | "name" | "vehicleType" | "tier" | "startingPoint" | "dailyPrice" | "supervisorName" | "isIntercityVendor";
+  type SortKey = "city" | "name" | "vehicleType" | "tier" | "startingPoint" | "dailyPrice" | "isIntercityVendor";
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const toggleSort = (key: SortKey) => setSort((s) => (s && s.key === key ? { key, dir: (s.dir === 1 ? -1 : 1) as 1 | -1 } : { key, dir: 1 }));
   const sortVal = (v: VendorMaster, k: SortKey): string | number => {
@@ -57,13 +57,12 @@ export default function VendorPanel({ initial, source, user }: { initial: Vendor
   const header = (label: string, key: SortKey) => (
     <th className="px-3 py-2 font-medium">
       <button onClick={() => toggleSort(key)} className="flex items-center gap-1 hover:text-slate-700">
-        {label}
-        <span className="text-[10px] text-slate-400">{sort?.key === key ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span>
+        {label}<span className="text-[10px] text-slate-400">{sort?.key === key ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span>
       </button>
     </th>
   );
 
-  // Packing-material cost per pallet — global setting that drives P&L cost calculation.
+  // Packing-material cost per pallet — global setting.
   const [packing, setPacking] = useState<number | null>(null);
   const [packingDraft, setPackingDraft] = useState("");
   const [savingPacking, setSavingPacking] = useState(false);
@@ -82,118 +81,113 @@ export default function VendorPanel({ initial, source, user }: { initial: Vendor
     setSavingPacking(false);
   }
 
-  async function toggleIntercity(v: VendorMaster) {
+  async function patchVendor(v: VendorMaster, patch: Partial<VendorMaster>) {
     setBusy(v.id);
-    const next = !v.isIntercityVendor;
-    await fetch("/api/vendors", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: v.id, isIntercityVendor: next }) });
-    setVendors((arr) => arr.map((x) => (x.id === v.id ? { ...x, isIntercityVendor: next } : x)));
+    await fetch("/api/vendors", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: v.id, ...patch }) });
+    setVendors((arr) => arr.map((x) => (x.id === v.id ? { ...x, ...patch } : x)));
     setBusy(null);
+  }
+  async function onDelete(v: VendorMaster) {
+    if (!window.confirm(`Delete vendor "${v.name}" (${v.city})? This cannot be undone.`)) return;
+    setBusy(v.id);
+    await fetch(`/api/vendors?id=${encodeURIComponent(v.id)}`, { method: "DELETE" });
+    setVendors((arr) => arr.filter((x) => x.id !== v.id));
+    setExp(null); setBusy(null);
   }
 
   return (
     <AppShell active="vendors" user={user}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-bold text-slate-900">Vendor panel</h1>
-            <p className="text-xs text-slate-500">
-              {vendors.length} vendors ·{" "}
-              <span className={source === "supabase" ? "font-medium text-emerald-600" : "text-amber-600"}>
-                {source === "supabase" ? "live from Supabase" : "static seed (Supabase not connected)"}
-              </span>
-            </p>
-          </div>
-          <button onClick={() => setShowAdd((s) => !s)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
-            {showAdd ? "Close" : "+ Add vendor"}
-          </button>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-bold text-slate-900">Vendor panel</h1>
+          <p className="text-xs text-slate-500">
+            {vendors.length} vendors ·{" "}
+            <span className={source === "supabase" ? "font-medium text-emerald-600" : "text-amber-600"}>
+              {source === "supabase" ? "live from Supabase" : "static seed (Supabase not connected)"}
+            </span>
+          </p>
         </div>
+        <button onClick={() => setShowAdd((s) => !s)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
+          {showAdd ? "Close" : "+ Add vendor"}
+        </button>
+      </div>
 
-        {showAdd && <AddForm onAdded={(v) => { setVendors((arr) => [...arr, v]); setShowAdd(false); }} />}
+      {showAdd && <AddForm existingCities={cities} onAdded={(vs) => { setVendors((arr) => [...arr, ...vs]); setShowAdd(false); }} />}
 
-        {/* Packing-material cost per pallet — feeds P&L cost calculation across the app */}
-        <Card className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-800">Packing material cost</div>
-            <div className="text-[11px] text-slate-500">₹ per pallet on pickups · used in every P&amp;L / margin calculation · applies on next schedule generate</div>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-sm text-slate-500">₹</span>
-            <input
-              type="number" min={0} value={packingDraft}
-              onChange={(e) => setPackingDraft(e.target.value)}
-              className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium text-slate-800"
-              placeholder="2000"
-            />
-            <span className="text-sm text-slate-500">/ pallet</span>
-            <button onClick={savePacking} disabled={!packingDirty || savingPacking} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
-              {savingPacking ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </Card>
-
-        {/* Stat cards (reflect the selected city) */}
-        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            { label: "Vendors", value: stats.total },
-            { label: "Cities", value: stats.cities },
-            { label: "General", value: stats.general },
-            { label: "Non-general", value: stats.nonGeneral },
-            { label: "Intercity", value: stats.intercity },
-            { label: "Daily cost", value: money(stats.dailyCost) },
-          ].map((s) => (
-            <Card key={s.label} className="p-3">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{s.label}</div>
-              <div className="mt-0.5 text-lg font-bold text-slate-900">{s.value}</div>
-            </Card>
-          ))}
+      <Card className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-800">Packing material cost</div>
+          <div className="text-[11px] text-slate-500">₹ per pallet on pickups · used in every P&amp;L / margin calculation · applies on next schedule generate</div>
         </div>
-
-        {/* City dropdown filter */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <label className="text-xs font-medium text-slate-500">City</label>
-          <select
-            value={cityFilter}
-            onChange={(e) => setCityFilter(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
-          >
-            <option value="All">All cities ({vendors.length})</option>
-            {cities.map((c) => (
-              <option key={c} value={c}>{c} ({vendors.filter((v) => v.city === c).length})</option>
-            ))}
-          </select>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-sm text-slate-500">₹</span>
+          <input type="number" min={0} value={packingDraft} onChange={(e) => setPackingDraft(e.target.value)} className="w-28 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium text-slate-800" placeholder="2000" />
+          <span className="text-sm text-slate-500">/ pallet</span>
+          <button onClick={savePacking} disabled={!packingDirty || savingPacking} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">{savingPacking ? "Saving…" : "Save"}</button>
         </div>
+      </Card>
 
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 text-left text-xs text-slate-500">
-                  {header("City", "city")}
-                  {header("Vendor", "name")}
-                  {header("Vehicle", "vehicleType")}
-                  {header("Tier", "tier")}
-                  {header("Starting point", "startingPoint")}
-                  {header("Daily price", "dailyPrice")}
-                  {header("Supervisor", "supervisorName")}
-                  {header("Intercity", "isIntercityVendor")}
-                  <th className="px-3 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((v) => (
-                  <Row
-                    key={v.id} v={v}
-                    mode={exp?.id === v.id ? exp.mode : null}
-                    busy={busy === v.id} onToggleIntercity={() => toggleIntercity(v)}
-                    canEdit={canEdit}
-                    onDetails={() => toggle(v.id, "details")} onCompliance={() => toggle(v.id, "compliance")}
-                    onEdit={() => toggle(v.id, "edit")} onCancelEdit={() => setExp(null)} onSaved={onSaved}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-        <p className="mt-3 text-xs text-slate-400">Details = team &amp; vehicle · Compliance = security deposit &amp; documents · Edit (admin) to change details or upload documents. Click the Intercity cell to toggle.</p>
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {[
+          { label: "Vendors", value: stats.total },
+          { label: "Active", value: stats.active },
+          { label: "Cities", value: stats.cities },
+          { label: "General", value: stats.general },
+          { label: "Intercity", value: stats.intercity },
+          { label: "Daily cost", value: money(stats.dailyCost) },
+        ].map((s) => (
+          <Card key={s.label} className="p-3">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{s.label}</div>
+            <div className="mt-0.5 text-lg font-bold text-slate-900">{s.value}</div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <label className="text-xs font-medium text-slate-500">City</label>
+        <select value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
+          <option value="All">All cities ({vendors.length})</option>
+          {cities.map((c) => <option key={c} value={c}>{c} ({vendors.filter((v) => v.city === c).length})</option>)}
+        </select>
+      </div>
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 text-left text-xs text-slate-500">
+                {header("City", "city")}
+                {header("Vendor", "name")}
+                {header("Vehicle", "vehicleType")}
+                {header("Tier", "tier")}
+                <th className="px-3 py-2 font-medium">Priority</th>
+                {header("Starting point", "startingPoint")}
+                {header("Daily price", "dailyPrice")}
+                <th className="px-3 py-2 font-medium">Supervisor</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
+                <th className="px-3 py-2 font-medium">Active</th>
+                {header("Intercity", "isIntercityVendor")}
+                <th className="px-3 py-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((v) => (
+                <Row
+                  key={v.id} v={v}
+                  mode={exp?.id === v.id ? exp.mode : null}
+                  busy={busy === v.id} canEdit={canEdit}
+                  onToggleIntercity={() => patchVendor(v, { isIntercityVendor: !v.isIntercityVendor })}
+                  onToggleActive={() => patchVendor(v, { active: !(v.active !== false) })}
+                  onSetPriority={(g) => patchVendor(v, { priorityGroup: g })}
+                  onDetails={() => toggle(v.id, "details")} onCompliance={() => toggle(v.id, "compliance")}
+                  onEdit={() => toggle(v.id, "edit")} onCancelEdit={() => setExp(null)} onSaved={onSaved} onDelete={() => onDelete(v)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      <p className="mt-3 text-xs text-slate-400">Toggle <b>Active</b> to include/exclude a vendor from scheduling · set a <b>Priority</b> group (A preferred) · Details / Compliance / Edit per row. Inactive vendors are skipped on the next generate.</p>
     </AppShell>
   );
 }
@@ -207,21 +201,23 @@ function DocLink({ label, url }: { label: string; url?: string | null }) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
           View document
         </a>
-      ) : (
-        <div className="text-sm text-slate-400">Not uploaded</div>
-      )}
+      ) : <div className="text-sm text-slate-400">Not uploaded</div>}
     </div>
   );
 }
 
-function Row({ v, mode, busy, onToggleIntercity, canEdit, onDetails, onCompliance, onEdit, onCancelEdit, onSaved }: {
-  v: VendorMaster; mode: "details" | "compliance" | "edit" | null; busy: boolean; onToggleIntercity: () => void;
-  canEdit: boolean; onDetails: () => void; onCompliance: () => void; onEdit: () => void; onCancelEdit: () => void; onSaved: (v: VendorMaster) => void;
+function Row({ v, mode, busy, canEdit, onToggleIntercity, onToggleActive, onSetPriority, onDetails, onCompliance, onEdit, onCancelEdit, onSaved, onDelete }: {
+  v: VendorMaster; mode: "details" | "compliance" | "edit" | null; busy: boolean; canEdit: boolean;
+  onToggleIntercity: () => void; onToggleActive: () => void; onSetPriority: (g: string | null) => void;
+  onDetails: () => void; onCompliance: () => void; onEdit: () => void; onCancelEdit: () => void; onSaved: (v: VendorMaster) => void; onDelete: () => void;
 }) {
   const open = mode !== null;
+  const isActive = v.active !== false;
+  const sup0 = primarySup(v);
+  const moreSup = v.supervisors ? Math.max(0, v.supervisors.length - 1) : 0;
   return (
     <>
-      <tr className="border-t border-slate-100 hover:bg-slate-50">
+      <tr className={`border-t border-slate-100 hover:bg-slate-50 ${isActive ? "" : "opacity-60"}`}>
         <td className="px-3 py-2.5 text-slate-600">{v.city}</td>
         <td className="cursor-pointer px-3 py-2.5 font-medium text-slate-800" onClick={onDetails}>
           <span className="mr-1 text-slate-400">{open ? "▾" : "▸"}</span>{v.name}
@@ -229,9 +225,20 @@ function Row({ v, mode, busy, onToggleIntercity, canEdit, onDetails, onComplianc
         </td>
         <td className="px-3 py-2.5 text-slate-600">{VEHICLE_LABEL[v.vehicleType] ?? v.vehicleType}</td>
         <td className="px-3 py-2.5"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${TIER_BADGE[v.tier] ?? TIER_BADGE.general}`}>{TIER_LABEL[v.tier] ?? v.tier}</span></td>
+        <td className="px-3 py-2.5">
+          <select value={v.priorityGroup ?? ""} disabled={busy} onChange={(e) => onSetPriority(e.target.value || null)} className={`rounded-md border-0 px-1.5 py-0.5 text-xs font-semibold ${PRIORITY_BADGE[v.priorityGroup ?? ""] ?? "bg-slate-50 text-slate-400"}`}>
+            <option value="">—</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+          </select>
+        </td>
         <td className="px-3 py-2.5 text-slate-500">{v.startingPoint || "—"}</td>
         <td className="px-3 py-2.5 text-slate-700">{v.dailyPrice != null ? `${money(v.dailyPrice)}/day` : v.pricingNote || "—"}</td>
-        <td className="px-3 py-2.5 text-slate-500">{v.supervisorName ? <>{v.supervisorName}{v.supervisorContact ? <span className="block text-xs text-slate-400">{v.supervisorContact}</span> : null}</> : "—"}</td>
+        <td className="px-3 py-2.5 text-slate-500">{sup0 ? <>{sup0.name}{moreSup > 0 ? <span className="ml-1 text-[10px] text-blue-600">+{moreSup}</span> : null}{sup0.phone ? <span className="block text-xs text-slate-400">{sup0.phone}</span> : null}</> : "—"}</td>
+        <td className="max-w-[140px] truncate px-3 py-2.5 text-slate-500" title={v.notes || ""}>{v.notes || "—"}</td>
+        <td className="px-3 py-2.5">
+          <button disabled={busy} onClick={onToggleActive} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${isActive ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-red-50 text-red-600 ring-red-200"}`}>
+            {busy ? "…" : isActive ? "Active" : "Inactive"}
+          </button>
+        </td>
         <td className="px-3 py-2.5">
           <button disabled={busy} onClick={onToggleIntercity} className={`rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${v.isIntercityVendor ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-slate-50 text-slate-500 ring-slate-200"}`}>
             {busy ? "…" : v.isIntercityVendor ? "Yes" : "No"}
@@ -240,12 +247,13 @@ function Row({ v, mode, busy, onToggleIntercity, canEdit, onDetails, onComplianc
         <td className="whitespace-nowrap px-3 py-2.5 text-right">
           <button onClick={onCompliance} className={`mr-3 text-xs font-medium hover:underline ${mode === "compliance" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"}`}>Compliance</button>
           {canEdit && <button onClick={onEdit} className={`mr-3 text-xs font-medium hover:underline ${mode === "edit" ? "text-indigo-600" : "text-slate-600 hover:text-slate-900"}`}>Edit</button>}
-          <button onClick={onDetails} className="text-xs text-blue-600 hover:underline">{mode === "details" ? "Hide" : "Details"}</button>
+          <button onClick={onDetails} className="mr-3 text-xs text-blue-600 hover:underline">{mode === "details" ? "Hide" : "Details"}</button>
+          {canEdit && <button disabled={busy} onClick={onDelete} className="text-xs font-medium text-red-500 hover:text-red-700 hover:underline">Delete</button>}
         </td>
       </tr>
       {open && (
         <tr className="border-t border-slate-100 bg-slate-50">
-          <td colSpan={9} className="px-3 py-3">
+          <td colSpan={12} className="px-3 py-3">
             {mode === "edit" ? (
               <EditForm v={v} onSaved={onSaved} onCancel={onCancelEdit} />
             ) : mode === "compliance" ? (
@@ -256,12 +264,16 @@ function Row({ v, mode, busy, onToggleIntercity, canEdit, onDetails, onComplianc
               </div>
             ) : (
               <div className="grid gap-x-8 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                <Detail label="Supervisor" value={v.supervisorName} sub={v.supervisorContact} />
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Supervisors</div>
+                  <div className="text-slate-700">{(v.supervisors && v.supervisors.length ? v.supervisors : (sup0 ? [sup0] : [])).map((s, i) => <span key={i} className="mr-3 inline-block">{s.name}{s.phone ? <span className="text-slate-400"> · {s.phone}</span> : null}</span>) || "—"}</div>
+                </div>
                 <Detail label="Driver" value={v.driverName} sub={v.driverContact} />
                 <Detail label="Packers" value={v.packerNames} />
                 <Detail label="Vehicle no" value={v.vehicleNo} />
                 <Detail label="System team" value={v.systemTeamNo} />
                 <Detail label="Pallet capacity" value={`${v.palletCapacity} pallets`} />
+                {v.notes && <div className="sm:col-span-2 lg:col-span-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Notes</div><div className="text-slate-700">{v.notes}</div></div>}
               </div>
             )}
           </td>
@@ -280,56 +292,66 @@ function Detail({ label, value, sub }: { label: string; value?: string | null; s
   );
 }
 
-// Admin edit: vendor fields + security deposit + upload service-agreement / GST documents.
+// Repeatable supervisor list (name + phone), up to 10.
+function SupervisorsEditor({ value, onChange }: { value: Sup[]; onChange: (v: Sup[]) => void }) {
+  const rows = value.length ? value : [{ name: "", phone: "" }];
+  const set = (i: number, k: "name" | "phone", val: string) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: val } : r)));
+  const add = () => { if (rows.length < 10) onChange([...rows, { name: "", phone: "" }]); };
+  const remove = (i: number) => onChange(rows.filter((_, j) => j !== i));
+  const input = "w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm";
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <input className={input} placeholder={`Supervisor ${i + 1} name`} value={r.name} onChange={(e) => set(i, "name", e.target.value)} />
+          <input className={input} placeholder="Phone" value={r.phone} onChange={(e) => set(i, "phone", e.target.value)} />
+          <button type="button" onClick={() => remove(i)} disabled={rows.length === 1} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 ring-1 ring-slate-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-30" title="Remove">−</button>
+        </div>
+      ))}
+      {rows.length < 10 && (
+        <button type="button" onClick={add} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 ring-1 ring-slate-200 hover:bg-blue-50">+ Add supervisor ({rows.length}/10)</button>
+      )}
+    </div>
+  );
+}
+
+// Admin edit.
 function EditForm({ v, onSaved, onCancel }: { v: VendorMaster; onSaved: (v: VendorMaster) => void; onCancel: () => void }) {
   const [f, setF] = useState({
     name: v.name ?? "", startingPoint: v.startingPoint ?? "", tier: v.tier,
     dailyPrice: v.dailyPrice != null ? String(v.dailyPrice) : "",
     securityDeposit: v.securityDeposit != null ? String(v.securityDeposit) : "",
-    supervisorName: v.supervisorName ?? "", supervisorContact: v.supervisorContact ?? "",
     driverName: v.driverName ?? "", driverContact: v.driverContact ?? "",
     packerNames: v.packerNames ?? "", vehicleNo: v.vehicleNo ?? "", systemTeamNo: v.systemTeamNo ?? "",
-    isIntercityVendor: v.isIntercityVendor,
+    notes: v.notes ?? "", priorityGroup: v.priorityGroup ?? "", isIntercityVendor: v.isIntercityVendor,
   });
+  const [sups, setSups] = useState<Sup[]>(v.supervisors && v.supervisors.length ? v.supervisors : (v.supervisorName ? [{ name: v.supervisorName, phone: v.supervisorContact || "" }] : [{ name: "", phone: "" }]));
   const [saFile, setSaFile] = useState<File | null>(null);
   const [gstFile, setGstFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const set = (k: string, val: string | boolean) => setF((p) => ({ ...p, [k]: val }));
 
-  async function upload(kind: "service_agreement" | "gst", file: File): Promise<string> {
-    const fd = new FormData();
-    fd.append("file", file); fd.append("vendorId", v.id); fd.append("kind", kind);
-    const r = await fetch("/api/vendors/upload", { method: "POST", body: fd });
-    const j = await r.json();
-    if (!r.ok || !j.ok) throw new Error(j.error || "upload failed");
-    return j.url as string;
-  }
-
   async function save() {
     setSaving(true); setErr("");
     try {
-      let sa = v.serviceAgreementUrl ?? null;
-      let gst = v.gstDocumentUrl ?? null;
-      if (saFile) sa = await upload("service_agreement", saFile);
-      if (gstFile) gst = await upload("gst", gstFile);
+      let sa = v.serviceAgreementUrl ?? null, gst = v.gstDocumentUrl ?? null;
+      if (saFile) sa = await uploadDoc(v.id, "service_agreement", saFile);
+      if (gstFile) gst = await uploadDoc(v.id, "gst", gstFile);
+      const cleanSups = sups.filter((s) => s.name.trim() || s.phone.trim()).map((s) => ({ name: s.name.trim(), phone: s.phone.trim() }));
       const patch = {
         id: v.id, name: f.name.trim(), startingPoint: f.startingPoint.trim(), tier: f.tier,
-        isIntercityVendor: f.isIntercityVendor,
+        isIntercityVendor: f.isIntercityVendor, notes: f.notes.trim() || null, priorityGroup: f.priorityGroup || null,
         dailyPrice: f.dailyPrice === "" ? null : Number(f.dailyPrice),
         securityDeposit: f.securityDeposit === "" ? null : Number(f.securityDeposit),
-        supervisorName: f.supervisorName.trim() || null, supervisorContact: f.supervisorContact.trim() || null,
         driverName: f.driverName.trim() || null, driverContact: f.driverContact.trim() || null,
         packerNames: f.packerNames.trim() || null, vehicleNo: f.vehicleNo.trim() || null, systemTeamNo: f.systemTeamNo.trim() || null,
+        supervisors: cleanSups,
       };
       const r = await fetch("/api/vendors", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
       if (!r.ok) throw new Error("Could not save changes");
-      onSaved({ ...v, ...patch, serviceAgreementUrl: sa, gstDocumentUrl: gst });
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+      onSaved({ ...v, ...patch, supervisors: cleanSups, supervisorName: cleanSups[0]?.name ?? null, supervisorContact: cleanSups[0]?.phone ?? null, serviceAgreementUrl: sa, gstDocumentUrl: gst });
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
   }
 
   const input = "w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm";
@@ -341,10 +363,7 @@ function EditForm({ v, onSaved, onCancel }: { v: VendorMaster; onSaved: (v: Vend
   );
   const docField = (label: string, current: string | null | undefined, file: File | null, setFile: (f: File | null) => void) => (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium text-slate-500">
-        {label}
-        {current && <a href={current} target="_blank" rel="noreferrer" className="ml-2 text-blue-600 hover:underline">current ↗</a>}
-      </span>
+      <span className="mb-1 block text-[11px] font-medium text-slate-500">{label}{current && <a href={current} target="_blank" rel="noreferrer" className="ml-2 text-blue-600 hover:underline">current ↗</a>}</span>
       <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
       {file && <span className="mt-1 block text-[11px] text-emerald-600">{file.name} — will upload on save</span>}
     </label>
@@ -356,23 +375,27 @@ function EditForm({ v, onSaved, onCancel }: { v: VendorMaster; onSaved: (v: Vend
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {field("Vendor name", "name")}
         {field("Starting point", "startingPoint")}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium text-slate-500">Tier</span>
-          <select className={input} value={f.tier} onChange={(e) => set("tier", e.target.value)}>
-            <option value="general">General</option>
-            <option value="non_general">Non-general</option>
-          </select>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Tier</span>
+          <select className={input} value={f.tier} onChange={(e) => set("tier", e.target.value)}><option value="general">General</option><option value="non_general">Non-general</option></select>
+        </label>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Priority group</span>
+          <select className={input} value={f.priorityGroup} onChange={(e) => set("priorityGroup", e.target.value)}><option value="">— none —</option><option value="A">A (preferred)</option><option value="B">B</option><option value="C">C</option></select>
         </label>
         {field("Daily price (₹)", "dailyPrice", "number")}
         {field("Security deposit (₹)", "securityDeposit", "number", "e.g. 25000")}
-        {field("Supervisor name", "supervisorName")}
-        {field("Supervisor contact", "supervisorContact")}
         {field("Driver name", "driverName")}
         {field("Driver contact", "driverContact")}
         {field("Packers", "packerNames")}
         {field("Vehicle no", "vehicleNo")}
         {field("System team", "systemTeamNo")}
       </div>
+
+      <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Supervisors (up to 10)</div>
+      <SupervisorsEditor value={sups} onChange={setSups} />
+
+      <label className="mt-4 block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Vendor notes</span>
+        <textarea className={input} rows={2} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Anything to remember about this vendor…" />
+      </label>
 
       <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Documents</div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -393,13 +416,6 @@ function EditForm({ v, onSaved, onCancel }: { v: VendorMaster; onSaved: (v: Vend
   );
 }
 
-const EMPTY = {
-  city: "", name: "", vehicleType: "14ft", tier: "general", startingPoint: "", dailyPrice: "", pricingNote: "", securityDeposit: "",
-  supervisorName: "", supervisorContact: "", driverName: "", driverContact: "", packerNames: "",
-  vehicleNo: "", vehicleName: "", systemTeamNo: "", remarks: "", isIntercityVendor: false,
-};
-
-// shared with EditForm: push a file to Blob for a vendor and return its URL
 async function uploadDoc(vendorId: string, kind: "service_agreement" | "gst", file: File): Promise<string> {
   const fd = new FormData();
   fd.append("file", file); fd.append("vendorId", vendorId); fd.append("kind", kind);
@@ -409,35 +425,43 @@ async function uploadDoc(vendorId: string, kind: "service_agreement" | "gst", fi
   return j.url as string;
 }
 
-function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
+const EMPTY = {
+  name: "", vehicleType: "14ft", tier: "general", startingPoint: "", dailyPrice: "", pricingNote: "", securityDeposit: "",
+  driverName: "", driverContact: "", packerNames: "", vehicleNo: "", vehicleName: "", systemTeamNo: "", remarks: "",
+  notes: "", priorityGroup: "", isIntercityVendor: false,
+};
+
+function AddForm({ existingCities, onAdded }: { existingCities: string[]; onAdded: (v: VendorMaster[]) => void }) {
   const [f, setF] = useState({ ...EMPTY });
+  const [selCities, setSelCities] = useState<string[]>([]);
+  const [newCity, setNewCity] = useState("");
+  const [sups, setSups] = useState<Sup[]>([{ name: "", phone: "" }]);
   const [saFile, setSaFile] = useState<File | null>(null);
   const [gstFile, setGstFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
+  const toggleCity = (c: string) => setSelCities((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]));
+  const addNewCity = () => { const c = newCity.trim(); if (c && !selCities.includes(c)) setSelCities((s) => [...s, c]); setNewCity(""); };
 
   async function submit() {
-    if (!f.city || !f.name) { setErr("City and vendor name are required"); return; }
+    if (!f.name || selCities.length === 0) { setErr("Vendor name and at least one city are required"); return; }
     setSaving(true); setErr("");
     try {
-      const res = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+      const cleanSups = sups.filter((s) => s.name.trim() || s.phone.trim()).map((s) => ({ name: s.name.trim(), phone: s.phone.trim() }));
+      const res = await fetch("/api/vendors", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...f, cities: selCities, supervisors: cleanSups }) });
       if (!res.ok) throw new Error("Could not save vendor");
-      const { vendor } = await res.json();
-      // documents need the new vendor's id, so upload after creation
-      let sa: string | null = null, gst: string | null = null;
-      if (saFile) sa = await uploadDoc(vendor.id, "service_agreement", saFile);
-      if (gstFile) gst = await uploadDoc(vendor.id, "gst", gstFile);
-      onAdded({ ...vendor, serviceAgreementUrl: sa, gstDocumentUrl: gst });
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+      const { vendors } = await res.json();
+      // upload documents to the FIRST created record (one set of docs per add)
+      if ((saFile || gstFile) && vendors[0]) {
+        if (saFile) vendors[0].serviceAgreementUrl = await uploadDoc(vendors[0].id, "service_agreement", saFile);
+        if (gstFile) vendors[0].gstDocumentUrl = await uploadDoc(vendors[0].id, "gst", gstFile);
+      }
+      onAdded(vendors);
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
   }
 
   const input = "w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm";
-  // plain function (NOT a component) so inputs don't remount/lose focus on each keystroke
   const field = (label: string, k: string, type = "text", placeholder = "") => (
     <label className="block">
       <span className="mb-1 block text-[11px] font-medium text-slate-500">{label}</span>
@@ -449,24 +473,32 @@ function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
     <Card className="mb-4 p-4">
       <div className="mb-3 text-sm font-semibold text-slate-700">Add a new vendor</div>
 
+      {/* cities — multi-select; one record is created per selected city */}
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Cities (one record created per city)</div>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {existingCities.map((c) => (
+          <button key={c} type="button" onClick={() => toggleCity(c)} className={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${selCities.includes(c) ? "bg-blue-600 text-white ring-blue-600" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50"}`}>{c}</button>
+        ))}
+        <span className="flex items-center gap-1">
+          <input className="w-32 rounded-lg border border-slate-200 px-2 py-1 text-xs" placeholder="+ new city" value={newCity} onChange={(e) => setNewCity(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addNewCity(); } }} />
+          <button type="button" onClick={addNewCity} className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 ring-1 ring-slate-200 hover:bg-blue-50">Add</button>
+        </span>
+      </div>
+      {selCities.length > 0 && <div className="mb-3 text-[11px] text-slate-500">Will create <b>{selCities.length}</b> record{selCities.length > 1 ? "s" : ""}: {selCities.join(", ")}</div>}
+
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Vendor &amp; pricing</div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {field("City", "city", "text", "e.g. Bangalore")}
         {field("Vendor name", "name", "text", "e.g. VMS Packers Team 1")}
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium text-slate-500">Vehicle</span>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Vehicle</span>
           <select className={input} value={f.vehicleType} onChange={(e) => { const vt = e.target.value; setF((p) => ({ ...p, vehicleType: vt, tier: vt === "others" ? "non_general" : p.tier })); }}>
-            <option value="14ft">14ft (7 pallets)</option>
-            <option value="10ft">10ft (4 pallets)</option>
-            <option value="others">Other (7 pallets)</option>
+            <option value="14ft">14ft (7 pallets)</option><option value="10ft">10ft (4 pallets)</option><option value="others">Other (7 pallets)</option>
           </select>
         </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium text-slate-500">Tier</span>
-          <select className={input} value={f.tier} onChange={(e) => set("tier", e.target.value)}>
-            <option value="general">General (pay daily regardless)</option>
-            <option value="non_general">Non-general (premium / on-demand)</option>
-          </select>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Tier</span>
+          <select className={input} value={f.tier} onChange={(e) => set("tier", e.target.value)}><option value="general">General (pay daily regardless)</option><option value="non_general">Non-general (premium / on-demand)</option></select>
+        </label>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Priority group</span>
+          <select className={input} value={f.priorityGroup} onChange={(e) => set("priorityGroup", e.target.value)}><option value="">— none —</option><option value="A">A (preferred)</option><option value="B">B</option><option value="C">C</option></select>
         </label>
         {field("Starting point (locality)", "startingPoint", "text", "e.g. Akshaya Nagar")}
         {field("Daily price (₹)", "dailyPrice", "number", "e.g. 7500")}
@@ -474,31 +506,33 @@ function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
         {field("Security deposit (₹)", "securityDeposit", "number", "e.g. 25000")}
       </div>
 
-      <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Documents</div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium text-slate-500">Service agreement</span>
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setSaFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
-          {saFile && <span className="mt-1 block text-[11px] text-emerald-600">{saFile.name}</span>}
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium text-slate-500">GST document</span>
-          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setGstFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
-          {gstFile && <span className="mt-1 block text-[11px] text-emerald-600">{gstFile.name}</span>}
-        </label>
-      </div>
+      <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Supervisors (up to 10)</div>
+      <SupervisorsEditor value={sups} onChange={setSups} />
 
       <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Team &amp; vehicle</div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {field("Supervisor name", "supervisorName")}
-        {field("Supervisor contact", "supervisorContact")}
         {field("Driver name", "driverName")}
         {field("Driver contact", "driverContact")}
         {field("Packers", "packerNames", "text", "comma-separated")}
         {field("Vehicle no", "vehicleNo", "text", "e.g. KA51AJ4776")}
         {field("Vehicle name", "vehicleName")}
         {field("System team", "systemTeamNo")}
-        {field("Remarks", "remarks")}
+      </div>
+
+      <label className="mt-4 block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Vendor notes</span>
+        <textarea className={input} rows={2} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Anything to remember about this vendor…" />
+      </label>
+
+      <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Documents</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">Service agreement</span>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setSaFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
+          {saFile && <span className="mt-1 block text-[11px] text-emerald-600">{saFile.name}</span>}
+        </label>
+        <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500">GST document</span>
+          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={(e) => setGstFile(e.target.files?.[0] ?? null)} className="w-full text-xs text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white" />
+          {gstFile && <span className="mt-1 block text-[11px] text-emerald-600">{gstFile.name}</span>}
+        </label>
       </div>
 
       <label className="mt-3 flex items-center gap-2 text-sm text-slate-700">
@@ -506,7 +540,7 @@ function AddForm({ onAdded }: { onAdded: (v: VendorMaster) => void }) {
       </label>
 
       {err && <div className="mt-2 text-xs text-red-600">{err}</div>}
-      <button onClick={submit} disabled={saving} className="mt-3 rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">{saving ? "Saving…" : "Save vendor"}</button>
+      <button onClick={submit} disabled={saving} className="mt-3 rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50">{saving ? "Saving…" : selCities.length > 1 ? `Save ${selCities.length} vendor records` : "Save vendor"}</button>
     </Card>
   );
 }

@@ -39,6 +39,7 @@ export interface Vendor {
   maxPalletsPerDay: number; // daily capacity ceiling (some A vendors can take more than 7)
   obligated: boolean; // A under contract -> base block is paid even if left idle
   phone?: string;
+  priorityGroup?: string | null; // 'A' | 'B' | 'C' allocation preference (A preferred)
 }
 
 export interface Booking {

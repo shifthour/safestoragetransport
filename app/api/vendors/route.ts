@@ -1,10 +1,11 @@
 // Vendor master API — backs the Vendor Panel.
-//   GET                      -> list all vendors (seed + persisted additions/edits)
-//   POST  { ...newVendor }   -> add a vendor (persisted to Blob)
-//   PATCH { id, ...patch }   -> edit a vendor (e.g. toggle isIntercityVendor)
+//   GET                          -> list all vendors (active + inactive)
+//   POST  { cities:[...], ... }  -> add a vendor PER city (independent records)
+//   PATCH { id, ...patch }       -> edit a vendor (toggle active/intercity, notes, priority, …)
+//   DELETE ?id= | { id }         -> delete a vendor
 
 import { NextRequest, NextResponse } from "next/server";
-import { listVendors, addVendor, updateVendor, diagnose } from "@/lib/vendors";
+import { listVendors, addVendor, updateVendor, deleteVendor, diagnose } from "@/lib/vendors";
 
 export const dynamic = "force-dynamic";
 
@@ -16,22 +17,22 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ vendors, source });
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  if (!body?.name || !body?.city || !body?.vehicleType) {
-    return NextResponse.json({ error: "name, city and vehicleType are required" }, { status: 400 });
+  // accept a single `city` or a list of `cities` — one independent record is created per city
+  const cities: string[] = Array.isArray(body?.cities) && body.cities.length ? body.cities : (body?.city ? [body.city] : []);
+  if (!body?.name || cities.length === 0 || !body?.vehicleType) {
+    return NextResponse.json({ error: "name, at least one city, and vehicleType are required" }, { status: 400 });
   }
-  const vendor = await addVendor({
-    city: body.city,
+  const common = {
     name: body.name,
     vehicleType: body.vehicleType,
     startingPoint: body.startingPoint ?? "",
     dailyPrice: body.dailyPrice != null && body.dailyPrice !== "" ? Number(body.dailyPrice) : null,
     pricingNote: body.pricingNote || null,
     isIntercityVendor: !!body.isIntercityVendor,
-    tier: body.tier === "non_general" ? "non_general" : "general",
-    supervisorName: body.supervisorName || null,
-    supervisorContact: body.supervisorContact || null,
+    tier: body.tier === "non_general" ? ("non_general" as const) : ("general" as const),
     driverName: body.driverName || null,
     driverContact: body.driverContact || null,
     packerNames: body.packerNames || null,
@@ -40,8 +41,13 @@ export async function POST(req: NextRequest) {
     systemTeamNo: body.systemTeamNo || null,
     remarks: body.remarks || null,
     securityDeposit: body.securityDeposit != null && body.securityDeposit !== "" ? Number(body.securityDeposit) : null,
-  });
-  return NextResponse.json({ vendor });
+    notes: body.notes || null,
+    priorityGroup: body.priorityGroup || null,
+    supervisors: Array.isArray(body.supervisors) ? body.supervisors : null,
+  };
+  const created = [];
+  for (const city of cities) created.push(await addVendor({ city, ...common }));
+  return NextResponse.json({ vendors: created, vendor: created[0] });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -51,3 +57,11 @@ export async function PATCH(req: NextRequest) {
   await updateVendor(id, patch);
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get("id") || (await req.json().catch(() => ({})))?.id;
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  await deleteVendor(id);
+  return NextResponse.json({ ok: true });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

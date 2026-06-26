@@ -31,6 +31,10 @@ export interface VendorMaster {
   securityDeposit?: number | null;
   serviceAgreementUrl?: string | null;
   gstDocumentUrl?: string | null;
+  // extras
+  notes?: string | null;
+  priorityGroup?: string | null; // 'A' | 'B' | 'C'
+  supervisors?: { name: string; phone: string }[] | null; // up to 10
   active: boolean;
   source: "excel" | "panel";
 }
@@ -99,6 +103,9 @@ function fromRow(r: any): VendorMaster {
     securityDeposit: r.security_deposit != null ? Number(r.security_deposit) : null,
     serviceAgreementUrl: r.service_agreement_url ?? null,
     gstDocumentUrl: r.gst_document_url ?? null,
+    notes: r.notes ?? null,
+    priorityGroup: r.priority_group ?? null,
+    supervisors: Array.isArray(r.supervisors) ? r.supervisors : null,
     active: r.active !== false,
     source: r.source === "panel" ? "panel" : "excel",
   };
@@ -123,6 +130,9 @@ export interface NewVendorInput {
   systemTeamNo?: string | null;
   remarks?: string | null;
   securityDeposit?: number | null;
+  notes?: string | null;
+  priorityGroup?: string | null;
+  supervisors?: { name: string; phone: string }[] | null;
 }
 
 const blank = (s?: string | null) => (s && s.trim() ? s.trim() : null);
@@ -132,7 +142,9 @@ export async function listVendors(): Promise<{ vendors: VendorMaster[]; source: 
   if (usingSupabase) {
     try {
       const c = await supa();
-      const { data, error } = await c.from(TABLE).select("*").eq("active", true).order("city").order("name");
+      // Panel shows ALL vendors (active + inactive) so they can be toggled; the scheduler filters
+      // active separately (masterVendorsForCity).
+      const { data, error } = await c.from(TABLE).select("*").order("city").order("name");
       if (error) throw new Error(error.message);
       return { vendors: (data ?? []).map(fromRow), source: "supabase" };
     } catch (e) {
@@ -145,6 +157,7 @@ export async function listVendors(): Promise<{ vendors: VendorMaster[]; source: 
 
 export async function addVendor(input: NewVendorInput): Promise<VendorMaster> {
   const vt = input.vehicleType;
+  const sups = (input.supervisors ?? []).filter((s) => s?.name?.trim() || s?.phone?.trim()).map((s) => ({ name: s.name.trim(), phone: s.phone.trim() })).slice(0, 10);
   if (usingSupabase) {
     const c = await supa();
     const row = {
@@ -154,12 +167,14 @@ export async function addVendor(input: NewVendorInput): Promise<VendorMaster> {
       daily_price: input.dailyPrice ?? null, pricing_note: blank(input.pricingNote),
       starting_point: blank(input.startingPoint),
       is_intercity_vendor: !!input.isIntercityVendor,
-      supervisor_name: blank(input.supervisorName), supervisor_contact: blank(input.supervisorContact),
+      // primary supervisor mirrors supervisors[0] so existing schedule displays keep working
+      supervisor_name: blank(sups?.[0]?.name ?? input.supervisorName), supervisor_contact: blank(sups?.[0]?.phone ?? input.supervisorContact),
       driver_name: blank(input.driverName), driver_contact: blank(input.driverContact),
       packer_names: blank(input.packerNames),
       vehicle_no: blank(input.vehicleNo), vehicle_name: blank(input.vehicleName),
       system_team_no: blank(input.systemTeamNo), remarks: blank(input.remarks),
       security_deposit: input.securityDeposit ?? null,
+      notes: blank(input.notes), priority_group: blank(input.priorityGroup), supervisors: sups.length ? sups : null,
       source: "panel",
     };
     const { data, error } = await c.from(TABLE).insert(row).select().single();
@@ -182,8 +197,16 @@ export async function updateVendor(id: string, patch: Partial<VendorMaster>): Pr
       vehicleNo: "vehicle_no", systemTeamNo: "system_team_no",
       securityDeposit: "security_deposit", serviceAgreementUrl: "service_agreement_url",
       gstDocumentUrl: "gst_document_url", active: "active",
+      notes: "notes", priorityGroup: "priority_group",
     };
     for (const [k, col] of Object.entries(M)) if (k in patch) row[col] = (patch as any)[k];
+    if ("supervisors" in patch) {
+      const sups = (patch.supervisors ?? []).filter((s) => s?.name?.trim() || s?.phone?.trim()).map((s) => ({ name: s.name.trim(), phone: s.phone.trim() })).slice(0, 10);
+      row.supervisors = sups.length ? sups : null;
+      // keep the primary supervisor column in sync (used by the schedule views)
+      row.supervisor_name = sups[0]?.name ?? null;
+      row.supervisor_contact = sups[0]?.phone ?? null;
+    }
     if (Object.keys(row).length === 0) return;
     const { error } = await c.from(TABLE).update(row).eq("id", id);
     if (error) throw new Error(error.message);
@@ -192,8 +215,18 @@ export async function updateVendor(id: string, patch: Partial<VendorMaster>): Pr
   return fallbackUpdate(id, patch);
 }
 
+export async function deleteVendor(id: string): Promise<void> {
+  if (usingSupabase) {
+    const c = await supa();
+    const { error } = await c.from(TABLE).delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  return fallbackDelete(id);
+}
+
 // ───────────────────────── Blob fallback (no Supabase) ─────────────────────────
-interface Overlay { added: VendorMaster[]; overrides: Record<string, Partial<VendorMaster>>; }
+interface Overlay { added: VendorMaster[]; overrides: Record<string, Partial<VendorMaster>>; deleted?: string[] }
 const OVERLAY_PATH = "vendors-overlay.json";
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
@@ -214,9 +247,10 @@ async function writeOverlay(o: Overlay) {
 }
 async function fallbackList(): Promise<VendorMaster[]> {
   const o = await readOverlay();
+  const deleted = new Set(o.deleted ?? []);
   const base = (seed as VendorMaster[]).map((v) => ({ ...v, ...(o.overrides[v.id] ?? {}) }));
   const added = o.added.map((v) => ({ ...v, ...(o.overrides[v.id] ?? {}) }));
-  return [...base, ...added].filter((v) => v.active !== false);
+  return [...base, ...added].filter((v) => !deleted.has(v.id)); // show all (active + inactive) for the panel
 }
 async function fallbackAdd(input: NewVendorInput): Promise<VendorMaster> {
   const o = await readOverlay();
@@ -239,6 +273,12 @@ async function fallbackAdd(input: NewVendorInput): Promise<VendorMaster> {
 async function fallbackUpdate(id: string, patch: Partial<VendorMaster>) {
   const o = await readOverlay();
   o.overrides[id] = { ...(o.overrides[id] ?? {}), ...patch };
+  await writeOverlay(o);
+}
+async function fallbackDelete(id: string) {
+  const o = await readOverlay();
+  o.added = o.added.filter((v) => v.id !== id);
+  o.deleted = [...new Set([...(o.deleted ?? []), id])];
   await writeOverlay(o);
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

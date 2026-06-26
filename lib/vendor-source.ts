@@ -26,6 +26,7 @@ export async function masterVendorsForCity(citySlug: string): Promise<Vendor[]> 
         palletObligation: 0, // no obligation: a vendor is paid only if used, nothing if idle
         maxPalletsPerDay: vendorDailyCap(vt), // ONE vehicle/day (rated + tolerance): 14ft 9, 10ft 6
         obligated: false,
+        priorityGroup: r.priority_group ?? null,
       } as Vendor;
     });
   } catch {

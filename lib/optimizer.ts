@@ -182,7 +182,9 @@ export function optimize(date: string, city: string, bookings: Booking[], vendor
     return best;
   };
 
-  const generals = vendors.filter((v) => v.tier === "general");
+  // Priority group preference (A preferred over B over C; unset sits between B and C).
+  const priRank = (v: Vendor) => ({ A: 0, B: 1, C: 2 } as Record<string, number>)[String(v.priorityGroup ?? "").toUpperCase()] ?? 1.5;
+  const generals = vendors.filter((v) => v.tier === "general").sort((a, b) => priRank(a) - priRank(b));
   const nons = vendors.filter((v) => v.tier === "non_general");
 
   // Phase 1a — fill each Type A base block tightly (cap at the obligation, no overshoot) so the
@@ -235,6 +237,7 @@ export function optimize(date: string, city: string, bookings: Booking[], vendor
           (conflict ? WINDOW_CONFLICT_PENALTY : 0) + // ...unless it clashes with a same-window order here
           (opensNew ? roadKm(v.depot, b.location) : -p * 1000) + // new: nearest depot; open: top it off
           (v.tier === "non_general" ? 500_000 : 0) + // keep premium/intercity vendors for overflow
+          priRank(v) * 800 + // gentle A→B→C preference (a tie-break, not a cost override)
           (vehicleMismatch(v, b) ? VEHICLE_PENALTY_SCORE : 0);
         if (score < bestScore) {
           bestScore = score;
