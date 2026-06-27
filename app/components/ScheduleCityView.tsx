@@ -31,7 +31,7 @@ function liftBadge(raw: string | null | undefined) {
 
 // One city's persisted schedule. Owns its own state; reloads from the server after any change
 // (reassign vendor / add resource / notify) so groupings stay correct.
-export default function ScheduleCityView({ initial }: { initial: ScheduleData }) {
+export default function ScheduleCityView({ initial, tab = "all" }: { initial: ScheduleData; tab?: "all" | "schedule" | "intercity" | "shifting" }) {
   const [sched, setSched] = useState<ScheduleData>(initial);
   const [pending, setPending] = useState<string | null>(null);
   const [openPlan, setOpenPlan] = useState<string | null>(null);
@@ -64,9 +64,22 @@ export default function ScheduleCityView({ initial }: { initial: ScheduleData })
     setPending(null);
   }
 
+  // Filter what shows per tab. Intercity + shifting orders live in the "to assign" bucket; the
+  // regular Schedule tab hides them, and the Intercity/Shifting tabs show only those.
+  const isShift = (o: any) => !!o.is_shifting;
+  const isInter = (o: any) => !!o.is_intercity && !o.is_shifting;
+  const isReg = (o: any) => !o.is_intercity && !o.is_shifting;
+  const keep = tab === "intercity" ? isInter : tab === "shifting" ? isShift : tab === "schedule" ? isReg : null;
+  const displayVendors = (keep == null
+    ? sched.vendors
+    : (tab === "intercity" || tab === "shifting")
+      ? sched.vendors.filter((v) => v.isUnassigned).map((v) => ({ ...v, orders: (v.orders as any[]).filter(keep) }))
+      : sched.vendors.map((v) => (v.isUnassigned ? { ...v, orders: (v.orders as any[]).filter(keep) } : v))
+  ).filter((v) => !v.isUnassigned || v.orders.length > 0);
+
   return (
     <div className="space-y-3">
-      {sched.vendors.map((v) => {
+      {displayVendors.map((v) => {
         const plan = v.plan ?? null;
         // What WE pay this vendor for the day: base (general = flat daily; non-general/intercity =
         // per-transaction × orders) + add-ons (₹800/resource, ₹1,500/extra trip). Updates live as
@@ -136,7 +149,7 @@ export default function ScheduleCityView({ initial }: { initial: ScheduleData })
                 <div key={o.id ?? o.order_id} className={`border-l-4 px-4 py-2.5 ${t.cls}`}>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     {!v.isUnassigned && <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{idx + 1}</span>}
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium text-white ${t.dot}`}>{t.label}{o.is_intercity ? " · intercity" : ""}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium text-white ${t.dot}`}>{t.label}{o.is_shifting ? " · shifting" : o.is_intercity ? " · intercity" : ""}</span>
                     <span className="text-sm font-medium text-slate-800">{o.customer_unique_id}</span>
                     <span className="text-sm text-slate-600">{o.locality} · {o.customer_name}</span>
                     {/* pallets: ACTUAL (as booked) first, ASSUMED (buffered for pickups) in brackets */}

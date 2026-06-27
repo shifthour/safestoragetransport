@@ -34,6 +34,7 @@ export async function generateSchedule(citySlug: string, date: string, trigger: 
     contact: b.contact ?? null,
     order_type: b.category ?? b.type,
     is_intercity: !!b.isIntercity,
+    is_shifting: !!b.isShifting,
     pallets: b.pallets,
     stated_pallets: b.statedPallets ?? null,
     lift: b.lift ?? null,
@@ -53,8 +54,8 @@ export async function generateSchedule(citySlug: string, date: string, trigger: 
   if (orderRows.length) {
     const { error } = await c.from("orders").upsert(orderRows, { onConflict: "order_id" });
     // Resilient to newer columns not existing yet (07/09/10 migrations): retry without them.
-    if (error && /(stated_pallets|lift|warehouse_lat|warehouse_lng)/.test(error.message || "")) {
-      const stripped = orderRows.map(({ stated_pallets, lift, warehouse_lat, warehouse_lng, ...rest }) => rest);
+    if (error && /(stated_pallets|lift|warehouse_lat|warehouse_lng|is_shifting)/.test(error.message || "")) {
+      const stripped = orderRows.map(({ stated_pallets, lift, warehouse_lat, warehouse_lng, is_shifting, ...rest }) => rest);
       await c.from("orders").upsert(stripped, { onConflict: "order_id" });
     }
   }
@@ -100,7 +101,7 @@ export async function generateSchedule(citySlug: string, date: string, trigger: 
 export interface ScheduleOrder {
   id: string; // orders.id (UUID) — used to reassign / set resources
   order_id: string; customer_unique_id: string; customer_name: string; contact: string | null;
-  order_type: string; is_intercity: boolean; pallets: number | null; stated_pallets: number | null; transport_charge: number | null;
+  order_type: string; is_intercity: boolean; is_shifting?: boolean; pallets: number | null; stated_pallets: number | null; transport_charge: number | null;
   locality: string | null; time_slot: string | null; required_time: string | null; team_notes: string | null; lift: string | null;
   trip_no: number; stop_seq: number; resources: number;
 }

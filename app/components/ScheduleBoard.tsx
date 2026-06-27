@@ -114,6 +114,14 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
       ? "what every team is doing today — assignments, day plans & timings"
       : "auto-generated at the 6 AM cut-off, or generate now";
 
+  // Tomorrow's schedule has Schedule / Intercity / Shifting sub-tabs (intercity + shifting are held
+  // out of the regular schedule). Other modes show everything ("all").
+  const [schedTab, setSchedTab] = useState<"schedule" | "intercity" | "shifting">("schedule");
+  const cats = { intercity: 0, shifting: 0 };
+  for (const c of shown) for (const v of c.vendors) for (const o of v.orders as any[]) { if (o.is_shifting) cats.shifting++; else if (o.is_intercity) cats.intercity++; }
+  const tabbed = !isHistory && !isToday; // tomorrow only
+  const cityTab: "all" | "schedule" | "intercity" | "shifting" = tabbed ? schedTab : "all";
+
   return (
     <AppShell active={activeKey} user={user}>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
@@ -183,8 +191,27 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
           )}
         </div>
 
-        {/* Summary stat cards */}
-        {!loading && shown.length > 0 && (
+        {/* Schedule / Intercity / Shifting sub-tabs (tomorrow only) */}
+        {tabbed && (
+          <div className="mb-4 flex gap-1 border-b border-slate-200">
+            {([
+              { id: "schedule", label: "Schedule" },
+              { id: "intercity", label: `Intercity${cats.intercity ? ` (${cats.intercity})` : ""}` },
+              { id: "shifting", label: `Shifting${cats.shifting ? ` (${cats.shifting})` : ""}` },
+            ] as const).map((tb) => (
+              <button
+                key={tb.id}
+                onClick={() => setSchedTab(tb.id)}
+                className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${schedTab === tb.id ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+              >
+                {tb.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Summary stat cards — only on the Schedule tab */}
+        {!loading && shown.length > 0 && cityTab !== "intercity" && cityTab !== "shifting" && (
           <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
             {[
               { label: "Cities", value: t.cities },
@@ -203,13 +230,15 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
           </div>
         )}
 
-        {!loading && shown.length > 0 && (
+        {!loading && shown.length > 0 && cityTab !== "intercity" && cityTab !== "shifting" && (
           <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Pickup ({t.pickup})</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Retrieval ({t.full})</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Partial ({t.partial})</span>
           </div>
         )}
+        {cityTab === "intercity" && <p className="mb-3 text-xs text-slate-500">Intercity bookings are kept out of the regular schedule — assign an intercity vendor on each one.</p>}
+        {cityTab === "shifting" && <p className="mb-3 text-xs text-slate-500">House-shifting bookings (rare) — handled separately from the regular pickup/retrieval schedule.</p>}
 
         {loading ? (
           <Card className="p-8 text-center text-sm text-slate-500">Loading schedule…</Card>
@@ -234,20 +263,34 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
         ) : isToday ? (
           // Monitoring: one lifecycle tracker per booking (no editing / generating here).
           <MonitoringView cities={shown} />
-        ) : (
-          <div className="space-y-6">
-            {shown.map((c) => (
-              <section key={c.city}>
-                <div className="mb-2 flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 pb-1">
-                  <h2 className="text-base font-bold text-slate-900">{cityName(c.city)}</h2>
-                  <span className="text-xs text-slate-500">{c.totals.vendors} vendors · {c.totals.orders} orders · {money(c.vendors.reduce((s, v) => s + v.revenue, 0))} transport</span>
-                  <span className={`text-xs ${c.totals.margin < 0 ? "text-red-600" : "text-emerald-600"}`}>margin {money(c.totals.margin)}</span>
-                </div>
-                <ScheduleCityView initial={c} />
-              </section>
-            ))}
-          </div>
-        )}
+        ) : (() => {
+          const matchN = (c: ScheduleData) =>
+            cityTab === "intercity" ? c.vendors.reduce((s, v) => s + (v.orders as any[]).filter((o) => o.is_intercity && !o.is_shifting).length, 0)
+            : cityTab === "shifting" ? c.vendors.reduce((s, v) => s + (v.orders as any[]).filter((o) => o.is_shifting).length, 0)
+            : 1;
+          const list = shown.filter((c) => matchN(c) > 0);
+          if (list.length === 0) {
+            return <Card className="p-8 text-center text-sm text-slate-500">{cityTab === "intercity" ? "No intercity bookings for this day." : "No shifting bookings for this day."}</Card>;
+          }
+          return (
+            <div className="space-y-6">
+              {list.map((c) => (
+                <section key={c.city}>
+                  <div className="mb-2 flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 pb-1">
+                    <h2 className="text-base font-bold text-slate-900">{cityName(c.city)}</h2>
+                    {cityTab === "intercity" || cityTab === "shifting"
+                      ? <span className="text-xs text-slate-500">{matchN(c)} booking{matchN(c) > 1 ? "s" : ""}</span>
+                      : <>
+                          <span className="text-xs text-slate-500">{c.totals.vendors} vendors · {c.totals.orders} orders · {money(c.vendors.reduce((s, v) => s + v.revenue, 0))} transport</span>
+                          <span className={`text-xs ${c.totals.margin < 0 ? "text-red-600" : "text-emerald-600"}`}>margin {money(c.totals.margin)}</span>
+                        </>}
+                  </div>
+                  <ScheduleCityView initial={c} tab={cityTab} />
+                </section>
+              ))}
+            </div>
+          );
+        })()}
     </AppShell>
   );
 }

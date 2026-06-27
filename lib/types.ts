@@ -50,6 +50,7 @@ export interface Booking {
   category?: OrderCategory; // pickup | full_retrieval | partial_retrieval (for the in-module filter)
   orderId?: string; // system order id (for persistence)
   isIntercity?: boolean;
+  isShifting?: boolean; // house-shifting booking (rare) — shown on its own tab
   customerName: string;
   location: GeoPoint; // customer pickup / delivery address
   warehouse: GeoPoint; // destination/origin warehouse

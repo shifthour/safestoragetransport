@@ -151,6 +151,7 @@ export async function loadLive(citySlug: string, date: string): Promise<DaySnaps
       category: /partial/i.test(o.order_type || "") ? "partial_retrieval" : /retriev/i.test(o.order_type || "") ? "full_retrieval" : "pickup",
       orderId: String(o.order_id || `${o.customer_unique_id}-${i}`),
       isIntercity: Boolean(o.is_intercity) || /intercity|shifting/i.test(o.order_type || ""),
+      isShifting: /shifting/i.test(o.order_type || ""),
       customerName: o.customer_name || o.customer_unique_id || "Customer",
       location: { lat: g.lat, lng: g.lng, label: g.locality ?? (o.order_address || "").split(",")[0] },
       warehouse: wh,
