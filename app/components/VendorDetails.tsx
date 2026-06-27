@@ -54,8 +54,9 @@ function PlanList({ plan }: { plan: any }) {
   return (
     <>
       <div className="mb-2 text-xs font-semibold text-slate-700">
-        Customer-preference order · starts {fmtClock(plan.steps.find((s: any) => s.kind === "start")?.arrive ?? 540)} · ends ~{fmtClock(plan.end)}
-        <span className="ml-2 font-normal text-slate-400">real road travel (OSRM); retrievals collected the evening before</span>
+        Morning retrievals · afternoon pickups · ends ~{fmtClock(plan.end)}
+        {plan.totalKm != null && <span className="ml-1 text-blue-600">· {plan.totalKm} km total</span>}
+        <span className="ml-2 font-normal text-slate-400">real road travel &amp; distance (OSRM); customer requests override</span>
       </div>
       <ol className="space-y-1.5">
         {plan.steps.map((s: any, i: number) => (
@@ -64,7 +65,7 @@ function PlanList({ plan }: { plan: any }) {
             <span className="w-28 shrink-0 font-medium text-slate-700">{s.kind === "wh-eve" ? "evening before" : `${fmtClock(s.arrive)}–${fmtClock(s.depart)}`}</span>
             <span className="min-w-0 text-slate-600">
               {s.label}
-              {(s.travel > 0 || s.work > 0) && <span className="text-slate-400"> · {s.travel}m travel + {s.work}m work</span>}
+              {(s.travel > 0 || s.work > 0 || (s.km ?? 0) > 0) && <span className="text-slate-400"> · {(s.km ?? 0) > 0 ? <b className="font-semibold text-blue-600">{s.km} km</b> : null}{(s.km ?? 0) > 0 && (s.travel > 0 || s.work > 0) ? " · " : ""}{s.travel > 0 ? `${s.travel}m travel` : ""}{s.travel > 0 && s.work > 0 ? " + " : ""}{s.work > 0 ? `${s.work}m work` : ""}</span>}
               {s.slot && <span className={`ml-1 rounded px-1 text-[10px] ring-1 ${s.late ? "bg-red-50 text-red-600 ring-red-200" : "bg-white text-slate-500 ring-slate-200"}`}>customer wants {String(s.slot).replace(/:00/g, "")}{s.late ? " · LATE" : ""}</span>}
               {liftBadge(s.lift) === false && <span className="ml-1 rounded bg-orange-100 px-1 text-[10px] font-medium text-orange-700">⚠ no lift</span>}
             </span>

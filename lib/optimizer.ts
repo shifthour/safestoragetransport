@@ -217,32 +217,38 @@ export function optimize(date: string, city: string, bookings: Booking[], vendor
     const order = [...remaining].map((id) => byId.get(id)!).sort((a, b) => b.pallets - a.pallets);
     for (const b of order) {
       if (!remaining.has(b.id)) continue;
-      let bestV: Vendor | null = null;
-      let bestScore = Infinity;
-      let bestOpensNew = false;
+      // Which vendors can take this order at all (capacity + the 2-trip/day cap). A vendor does at
+      // most 2 trips/day; a 3rd trip is added by the team manually, not here. An empty vendor always
+      // fits a single (even oversize) order — it can't be split.
+      const fitting: { v: Vendor; p: number; opensNew: boolean }[] = [];
       for (const v of [...generals, ...nons]) {
         const p = palletsAt(v.id);
         const opensNew = p < EPS;
-        // A vendor does at most 2 trips/day. Adding an order that would force a 3rd trip (e.g. a
-        // different warehouse / direction) is NOT auto-allowed — the team adds a 3rd trip by hand
-        // only when leftovers are genuinely in the same direction. Empty vendor always takes a
-        // single (even oversize) order; it can't be split.
         const prospectiveTrips = buildTrips(v, [...assignedTo.get(v.id)!, b]).length;
         const fits = opensNew || (prospectiveTrips <= TRIPS_PER_DAY && p + b.pallets <= v.maxPalletsPerDay + EPS);
-        if (!fits) continue;
-        const wB = slotWindow(b);
-        const conflict = !opensNew && !!wB && assignedTo.get(v.id)!.some((x) => windowsOverlap(slotWindow(x), wB));
-        const score =
-          (opensNew ? 1 : 0) * 1_000_000_000 + // strongly prefer filling an open vehicle over a new one
-          (conflict ? WINDOW_CONFLICT_PENALTY : 0) + // ...unless it clashes with a same-window order here
-          (opensNew ? roadKm(v.depot, b.location) : -p * 1000) + // new: nearest depot; open: top it off
-          (v.tier === "non_general" ? 500_000 : 0) + // keep premium/intercity vendors for overflow
-          priRank(v) * 800 + // gentle A→B→C preference (a tie-break, not a cost override)
-          (vehicleMismatch(v, b) ? VEHICLE_PENALTY_SCORE : 0);
-        if (score < bestScore) {
-          bestScore = score;
-          bestV = v;
-          bestOpensNew = opensNew;
+        if (fits) fitting.push({ v, p, opensNew });
+      }
+      // HARD priority: an order goes to the highest priority group (A→B→C, then unset) that can take
+      // it — every A vendor is exhausted before any B is used, even if a B vendor is nearer.
+      let bestV: Vendor | null = null;
+      let bestScore = Infinity;
+      let bestOpensNew = false;
+      if (fitting.length) {
+        const minRank = Math.min(...fitting.map(({ v }) => priRank(v)));
+        for (const { v, p, opensNew } of fitting.filter(({ v }) => priRank(v) === minRank)) {
+          const wB = slotWindow(b);
+          const conflict = !opensNew && !!wB && assignedTo.get(v.id)!.some((x) => windowsOverlap(slotWindow(x), wB));
+          // PROXIMITY: distance from this order to the vendor's cluster (depot + the stops it already
+          // holds). Filling a vehicle is preferred, but only with orders near its cluster — so a
+          // vendor isn't sent to a far locality just to top off its load.
+          const clusterKm = Math.min(roadKm(v.depot, b.location), ...assignedTo.get(v.id)!.map((x) => roadKm(x.location, b.location)));
+          const score =
+            (opensNew ? 1 : 0) * 1_000_000_000 + // strongly prefer filling an open vehicle over a new one
+            (conflict ? WINDOW_CONFLICT_PENALTY : 0) + // ...unless it clashes with a same-window order here
+            (opensNew ? clusterKm : -p * 1000 + clusterKm * 1000) + // new: nearest depot; fill: top off but stay near the cluster
+            (v.tier === "non_general" ? 500_000 : 0) + // keep premium/intercity vendors for overflow
+            (vehicleMismatch(v, b) ? VEHICLE_PENALTY_SCORE : 0);
+          if (score < bestScore) { bestScore = score; bestV = v; bestOpensNew = opensNew; }
         }
       }
       if (bestV) {
