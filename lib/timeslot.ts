@@ -47,7 +47,7 @@ export function parseSlot(raw?: string | null): Slot | null {
 export function parseRequiredTime(notes?: string | null): { text: string; slot?: Slot } | null {
   if (!notes) return null;
   const n = notes.toLowerCase();
-  if (!/\b(slot|morning|afternoon|evening|noon|\d{1,2}\s*(am|pm)|\d{1,2}:\d{2})\b/.test(n)) return null;
+  if (!/\b(slot|morning|afternoon|evening|noon|first half|second half|1st half|2nd half|forenoon|\d{1,2}\s*(am|pm)|\d{1,2}:\d{2})\b/.test(n)) return null;
 
   let slot: Slot | undefined;
   let text = "";
@@ -64,7 +64,8 @@ export function parseRequiredTime(notes?: string | null): { text: string; slot?:
       text = m[0].trim();
     }
   }
-  if (!slot && /morning/.test(n)) { slot = { startMin: 9 * 60, endMin: 12 * 60 }; text = "morning slot"; }
+  if (!slot && (/morning/.test(n) || /(first half|1st half|forenoon)/.test(n))) { slot = { startMin: 9 * 60, endMin: 12 * 60 }; text = /first half|1st half|forenoon/.test(n) ? "first half" : "morning slot"; }
+  else if (!slot && /(second half|2nd half)/.test(n)) { slot = { startMin: 13 * 60, endMin: 18 * 60 }; text = "second half"; }
   else if (!slot && /(afternoon|noon)/.test(n)) { slot = { startMin: 12 * 60, endMin: 15 * 60 }; text = "afternoon slot"; }
   else if (!slot && /evening/.test(n)) { slot = { startMin: 16 * 60, endMin: 19 * 60 }; text = "evening slot"; }
 

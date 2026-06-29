@@ -5,8 +5,7 @@
 
 import { roadMatrix } from "./routing";
 
-const MORNING = 9 * 60;     // 9:00 AM — retrievals
-const AFTERNOON = 14 * 60;  // 2:00 PM — pickups (unless the customer asked for morning)
+const MORNING = 9 * 60;     // 9:00 AM — day start
 const PICKUP_WORK = 240;    // pickup = packing + loading ~4h
 const RETR_DELIVER = 60;    // retrieval = deliver/unload ~1h
 const WH_UNLOAD = 30;       // unload pickups at the warehouse
@@ -31,18 +30,22 @@ function slotRange(slot: string | null | undefined): { start: number; end: numbe
     ts.push(h * 60 + mi);
   }
   if (ts.length) return { start: ts[0], end: ts[ts.length - 1] || ts[0] };
-  if (/\bmorning\b/.test(s)) return { start: 9 * 60, end: 12 * 60 };
+  if (/\bmorning\b/.test(s) || /\b(first half|1st half|forenoon)\b/.test(s)) return { start: 9 * 60, end: 12 * 60 };
+  if (/\b(second half|2nd half)\b/.test(s)) return { start: 13 * 60, end: 18 * 60 };
   if (/\bnoon\b/.test(s)) return { start: 12 * 60, end: 13 * 60 };
   if (/\bafter\s?noon\b/.test(s)) return { start: 13 * 60, end: 16 * 60 };
   if (/\bevening\b/.test(s)) return { start: 16 * 60, end: 19 * 60 };
   if (/\bnight\b/.test(s)) return { start: 18 * 60, end: 21 * 60 };
   return null;
 }
-// Explicit customer request (required_time) outranks the booked slot — used for lateness.
+// Explicit customer request (required_time) outranks the booked slot — used for lateness + waiting.
 const effWindow = (o: any) => slotRange(o.required_time) ?? slotRange(o.time_slot);
-// When a stop is scheduled: the customer's requested start if any; otherwise retrievals = morning,
-// pickups = afternoon.
-const targetStart = (o: any) => effWindow(o)?.start ?? (o.order_type === "pickup" ? AFTERNOON : MORNING);
+// Visit ORDER only: a requested window first; otherwise retrievals (pre-loaded, delivered first)
+// before pickups. This never makes a vendor wait — it just sequences the day.
+const sortKey = (o: any) => effWindow(o)?.start ?? (o.order_type === "pickup" ? 13 * 60 : MORNING);
+// A stop WAITS only if the customer asked for a specific window; otherwise it's done as early as the
+// vehicle can reach it (back-to-back from 9 AM) — no artificial afternoon floor.
+const clampStart = (o: any) => effWindow(o)?.start ?? null;
 
 export async function buildVendorPlan(v: any): Promise<VendorPlan> {
   const pts: { lat: number; lng: number }[] = [];
@@ -67,7 +70,8 @@ export async function buildVendorPlan(v: any): Promise<VendorPlan> {
   let totalKm = 0;
 
   const push = (kind: string, label: string, t: number, kmLeg: number | null, work: number, o?: any) => {
-    const arrive = Math.max(clock + t, o ? targetStart(o) : clock + t); // wait for the stop's window
+    const ws = o ? clampStart(o) : null;
+    const arrive = ws != null ? Math.max(clock + t, ws) : clock + t; // wait only for an explicit window
     clock = arrive + work;
     if (kmLeg) totalKm += kmLeg;
     const w = o ? effWindow(o) : null;
@@ -79,7 +83,7 @@ export async function buildVendorPlan(v: any): Promise<VendorPlan> {
   // Order every stop by when it should happen (customer request → else retrieval-morning / pickup-
   // afternoon), tie-break retrieval before pickup, then the optimiser's stop sequence.
   const seq = [...v.orders].sort((a: any, b: any) =>
-    targetStart(a) - targetStart(b) ||
+    sortKey(a) - sortKey(b) ||
     (a.order_type === "pickup" ? 1 : 0) - (b.order_type === "pickup" ? 1 : 0) ||
     (a.stop_seq || 0) - (b.stop_seq || 0));
   const retrCount = v.orders.filter((o: any) => o.order_type !== "pickup").length;

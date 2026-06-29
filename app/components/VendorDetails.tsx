@@ -54,9 +54,9 @@ function PlanList({ plan }: { plan: any }) {
   return (
     <>
       <div className="mb-2 text-xs font-semibold text-slate-700">
-        Morning retrievals · afternoon pickups · ends ~{fmtClock(plan.end)}
+        Retrievals first, then pickups · starts {fmtClock(plan.steps.find((s: any) => s.kind === "start")?.arrive ?? 540)} · ends ~{fmtClock(plan.end)}
         {plan.totalKm != null && <span className="ml-1 text-blue-600">· {plan.totalKm} km total</span>}
-        <span className="ml-2 font-normal text-slate-400">real road travel &amp; distance (OSRM); customer requests override</span>
+        <span className="ml-2 font-normal text-slate-400">back-to-back from 9 AM; a stop waits only if the customer asked for a window</span>
       </div>
       <ol className="space-y-1.5">
         {plan.steps.map((s: any, i: number) => (
