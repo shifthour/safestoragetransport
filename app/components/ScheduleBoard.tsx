@@ -130,8 +130,9 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
 
   async function generate() {
     setBusy(true);
-    await fetch("/api/schedule/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: data?.date }) });
-    await load(mode === "history" ? selDate : undefined);
+    const genDate = data?.date ?? (mode === "today" ? todayStr : undefined);
+    await fetch("/api/schedule/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date: genDate }) });
+    await load(mode === "history" ? selDate : mode === "today" ? todayStr : undefined);
     setBusy(false);
   }
 
@@ -373,12 +374,12 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
               {isHistory
                 ? "Schedules accumulate here as the cron runs each morning (and whenever you generate one). Generate tomorrow's from the Tomorrow's schedule tab to get started."
                 : isToday
-                  ? "Today's bookings appear here for monitoring once the schedule exists. It's built automatically each morning — generate the next day from the Tomorrow's schedule tab."
+                  ? "Today's bookings appear here for monitoring once the schedule exists. It's normally built automatically the morning before — if that was missed, you can generate it now."
                   : "The cron builds this automatically each morning at the cut-off. You can also generate it now — it pulls every city's orders for that day and allocates them across your vendor master."}
             </p>
-            {!isHistory && !isToday && (
+            {!isHistory && (
               <button onClick={generate} disabled={busy} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-                {busy ? "Generating…" : "Generate now"}
+                {busy ? "Generating…" : isToday ? "Generate today's schedule" : "Generate now"}
               </button>
             )}
           </Card>
