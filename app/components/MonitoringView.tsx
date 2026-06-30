@@ -63,6 +63,37 @@ function vendorChain(v: any, m: LiveMap): LifeStep[] {
   return steps;
 }
 
+// Current wall-clock in IST, as minutes-from-midnight — to compare against the plan's arrive/depart
+// (which are built on a 9 AM IST start). Independent of the viewer's own timezone.
+function nowMinIST(): number {
+  const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date());
+  const h = Number(p.find((x) => x.type === "hour")?.value ?? 0);
+  const mi = Number(p.find((x) => x.type === "minute")?.value ?? 0);
+  return h * 60 + mi;
+}
+
+// How off-track a team is RIGHT NOW. For every stop not yet done we compare the planned finish time
+// (depart) against the clock: a stop whose time has passed but isn't done is "overdue", and we add up
+// how many minutes behind. Higher score = more / longer overdue stops = needs attention first.
+function vendorRisk(v: any, m: LiveMap, now: number) {
+  let behind = 0, overdue = 0, pendingLate = 0, done = 0;
+  const total = v.orders.length;
+  for (const o of v.orders) {
+    const isDone = isPickup(o) ? pickedUp(o, m) : delivered(o, m);
+    if (isDone) { done++; continue; }
+    const bo = v.plan?.byOrder?.[o.customer_unique_id];
+    if (bo?.late) pendingLate++;
+    const planned = bo?.depart ?? bo?.arrive ?? null;
+    if (planned != null && now > planned) { overdue++; behind += now - planned; }
+  }
+  const allDone = total > 0 && done === total;
+  // allDone sinks to the bottom; on-track-but-pending sits above that; any overdue ranks on top.
+  const score = allDone ? -1 : behind + overdue * 10 + pendingLate * 20;
+  return { score, behind, overdue, pendingLate, allDone };
+}
+
+const behindLabel = (min: number) => (min >= 60 ? `${Math.floor(min / 60)}h ${min % 60}m` : `${min}m`);
+
 export default function MonitoringView({ cities }: { cities: ScheduleData[] }) {
   const [live, setLive] = useState<LiveMap>({});
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -81,11 +112,17 @@ export default function MonitoringView({ cities }: { cities: ScheduleData[] }) {
   }, []);
 
   if (cities.length === 0) return null;
+  const now = nowMinIST();
   return (
     <div className="space-y-8">
       {updatedAt && <div className="-mt-2 text-right text-[11px] text-slate-400">live status · updated {updatedAt} · auto-refreshes every minute</div>}
       {cities.map((c) => {
-        const assigned = c.vendors.filter((v: any) => !v.isUnassigned && v.orders.length);
+        // Worst-first: teams running late float to the top, on-track teams sink, finished ones last.
+        const assigned = c.vendors
+          .filter((v: any) => !v.isUnassigned && v.orders.length)
+          .map((v: any) => ({ v, risk: vendorRisk(v, live, now) }))
+          .sort((a, b) => b.risk.score - a.risk.score || b.risk.overdue - a.risk.overdue)
+          .map((x) => x.v);
         const unassigned = c.vendors.filter((v: any) => v.isUnassigned).flatMap((v: any) => v.orders);
         if (assigned.length === 0 && unassigned.length === 0) return null;
         return (
@@ -106,30 +143,40 @@ export default function MonitoringView({ cities }: { cities: ScheduleData[] }) {
                 const allDone = activeIdx === -1;
                 const next = allDone ? null : steps[activeIdx];
                 const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : 0;
+                const risk = vendorRisk(v, live, now);
+                const late = !allDone && risk.overdue > 0;
                 return (
-                  <div key={v.vendorId ?? v.vendorName} className={`rounded-xl border border-slate-200 border-l-4 bg-white p-4 ${allDone ? "border-l-emerald-500" : "border-l-amber-400"}`}>
+                  <div key={v.vendorId ?? v.vendorName} className={`rounded-xl border bg-white p-4 border-l-4 ${late ? "border-rose-200 border-l-rose-500 ring-1 ring-rose-100" : allDone ? "border-slate-200 border-l-emerald-500" : "border-slate-200 border-l-amber-400"}`}>
                     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="text-sm font-bold text-slate-900">{v.vendorName}</span>
                       {vendorContact && <span className="text-xs text-slate-400">{vendorContact}</span>}
                       {v.isIntercity && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 ring-1 ring-violet-200">intercity</span>}
                       <span className="text-xs text-slate-500">{retr ? `${retr} retrieval${retr > 1 ? "s" : ""}` : ""}{retr && pick ? " · " : ""}{pick ? `${pick} pickup${pick > 1 ? "s" : ""}` : ""}</span>
-                      {/* Where this team is right now — reads before you scan the steps */}
-                      {allDone ? (
-                        <span className="ml-auto flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><path d="m5 13 4 4L19 7" /></svg>
-                          All stops done
-                        </span>
-                      ) : (
-                        <span className="ml-auto flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
-                          <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" /></span>
-                          Next: <b className="font-semibold text-amber-900">{next?.label}{next?.top?.ref ? ` · ${next.top.ref}` : ""}</b>
-                        </span>
-                      )}
+                      {/* Where this team is right now — late warning first, then the next/done state */}
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        {late && (
+                          <span className="flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
+                            <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-rose-500" /></span>
+                            ⚠ Running late · {risk.overdue} stop{risk.overdue > 1 ? "s" : ""} · {behindLabel(risk.behind)} behind
+                          </span>
+                        )}
+                        {allDone ? (
+                          <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><path d="m5 13 4 4L19 7" /></svg>
+                            All stops done
+                          </span>
+                        ) : (
+                          <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${late ? "bg-slate-50 text-slate-600 ring-1 ring-slate-200" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"}`}>
+                            {!late && <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" /><span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" /></span>}
+                            Next: <b className={late ? "font-semibold text-slate-800" : "font-semibold text-amber-900"}>{next?.label}{next?.top?.ref ? ` · ${next.top.ref}` : ""}</b>
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {/* Progress bar: how far through the run this team is */}
                     <div className="mb-3 flex items-center gap-2.5">
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                        <div className={`h-full rounded-full ${allDone ? "bg-emerald-500" : "bg-amber-400"}`} style={{ width: `${pct}%` }} />
+                        <div className={`h-full rounded-full ${late ? "bg-rose-500" : allDone ? "bg-emerald-500" : "bg-amber-400"}`} style={{ width: `${pct}%` }} />
                       </div>
                       <span className="shrink-0 text-[11px] font-medium text-slate-500">{doneCount}/{steps.length} stops</span>
                     </div>
