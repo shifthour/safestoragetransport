@@ -39,6 +39,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           port: 21
+          timeout: 120000
           # cPanel main-account FTP lands in /home/<user>, so the app dir is this relative path.
           # If deploy fails with "directory not found", adjust this to match your FTP root.
           server-dir: public_html/safestorage-transport/
@@ -51,3 +52,5 @@ jobs:
             **/node_modules/**
             .github/**
             **/.next/cache/**
+            **/*.map
+            **/*.nft.json
