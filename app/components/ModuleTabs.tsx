@@ -1,5 +1,7 @@
 "use client";
 
+import { withBase } from "@/lib/base";
+
 // The three tabs that live INSIDE the Pickup & Retrieval module.
 //   Dashboard    — per-city / per-date analysis (overview, P&L, map, …)
 //   Schedule     — tomorrow's optimised schedule across ALL cities
@@ -15,7 +17,7 @@ export default function ModuleTabs({ active }: { active: "dashboard" | "schedule
       {tabs.map((t) => (
         <a
           key={t.id}
-          href={t.href}
+          href={withBase(t.href)}
           className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
             active === t.id ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"
           }`}

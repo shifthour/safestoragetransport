@@ -5,6 +5,7 @@ import { OptimizationResult } from "@/lib/types";
 import { Diagnostics } from "@/lib/diagnostics";
 import { filterByScope, countByCategory, timeRequests, Scope } from "@/lib/filter";
 import { SessionUser } from "@/lib/auth";
+import { withBase } from "@/lib/base";
 import AppShell from "./AppShell";
 import { KpiCards, SavingsPanel, ObligationPanel, UtilizationPanel } from "./Panels";
 import AssignmentBoard from "./AssignmentBoard";
@@ -67,26 +68,26 @@ export default function Dashboard({
 
         {/* Toolbar: source / city / date / excel (inside the module) */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <a href="/?src=live" className={`rounded-md px-2.5 py-1 text-xs font-medium ${activeSource === "live" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>Live</a>
-          <a href="/?src=sample" className={`rounded-md px-2.5 py-1 text-xs font-medium ${activeSource === "sample" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>Sample</a>
+          <a href={withBase("/?src=live")} className={`rounded-md px-2.5 py-1 text-xs font-medium ${activeSource === "live" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>Live</a>
+          <a href={withBase("/?src=sample")} className={`rounded-md px-2.5 py-1 text-xs font-medium ${activeSource === "sample" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>Sample</a>
         </div>
         {source === "live" && cities && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">City
-              <select defaultValue={activeCity} onChange={(e) => { window.location.href = `/?src=live&city=${e.currentTarget.value}`; }}
+              <select defaultValue={activeCity} onChange={(e) => { window.location.href = withBase(`/?src=live&city=${e.currentTarget.value}`); }}
                 className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800">
                 {cities.map((c) => <option key={c.slug} value={c.slug}>{c.name} ({c.count})</option>)}
               </select>
             </label>
             {dates && dates.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs font-medium text-slate-500">Date
-                <select defaultValue={activeDate} onChange={(e) => { window.location.href = `/?src=live&city=${activeCity}&date=${e.currentTarget.value}`; }}
+                <select defaultValue={activeDate} onChange={(e) => { window.location.href = withBase(`/?src=live&city=${activeCity}&date=${e.currentTarget.value}`); }}
                   className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-800">
                   {dates.map((d) => <option key={d.date} value={d.date}>{d.date} ({d.count})</option>)}
                 </select>
               </label>
             )}
-            <a href={`/api/export?date=${activeDate}`} className="ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">⬇ Download Excel</a>
+            <a href={withBase(`/api/export?date=${activeDate}`)} className="ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">⬇ Download Excel</a>
           </div>
         )}
 

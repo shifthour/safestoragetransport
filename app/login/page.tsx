@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { withBase } from "@/lib/base";
 
 const FEATURES = [
   { icon: "M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4M3 17l9 4 9-4", label: "Smart vendor allocation" },
@@ -33,7 +34,7 @@ export default function LoginPage() {
         return;
       }
       const next = new URLSearchParams(window.location.search).get("next");
-      window.location.href = next && next.startsWith("/") ? next : "/";
+      window.location.href = withBase(next && next.startsWith("/") ? next : "/");
     } catch {
       setError("Network error — please try again");
       setBusy(false);
@@ -53,7 +54,7 @@ export default function LoginPage() {
           <div className="relative">
             <div className="inline-flex rounded-2xl bg-white px-4 py-3 shadow-lg">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/safestorage-logo.svg" alt="SafeStorage" className="h-9 w-auto" />
+              <img src={withBase("/safestorage-logo.svg")} alt="SafeStorage" className="h-9 w-auto" />
             </div>
             <div className="mt-10 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
               Smart Transport · Ops Console
@@ -85,7 +86,7 @@ export default function LoginPage() {
           {/* logo on small screens (left panel is hidden) */}
           <div className="mb-8 md:hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/safestorage-logo.svg" alt="SafeStorage" className="h-9 w-auto" />
+            <img src={withBase("/safestorage-logo.svg")} alt="SafeStorage" className="h-9 w-auto" />
           </div>
           <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Sign in</div>
           <h2 className="mt-2 text-3xl font-bold text-slate-900">Welcome back</h2>

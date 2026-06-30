@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ScheduleData } from "@/lib/schedule";
 import { money } from "@/lib/format";
 import { SessionUser } from "@/lib/auth";
+import { withBase } from "@/lib/base";
 import AppShell from "./AppShell";
 import ScheduleCityView from "./ScheduleCityView";
 import MonitoringView from "./MonitoringView";
@@ -179,7 +180,7 @@ export default function ScheduleBoard({ mode, user }: { mode: "today" | "tomorro
           <div className="flex items-center gap-2">
             {data?.date && allCities.length > 0 && (
               <a
-                href={`/api/export?date=${data.date}${cityFilter !== "All" ? `&city=${cityFilter}` : ""}`}
+                href={withBase(`/api/export?date=${data.date}${cityFilter !== "All" ? `&city=${cityFilter}` : ""}`)}
                 className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
               >
                 ⬇ Download Excel

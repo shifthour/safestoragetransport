@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SessionUser } from "@/lib/auth";
+import { withBase } from "@/lib/base";
 
 export type NavKey = "dashboard" | "today" | "schedule" | "history" | "vendors" | "rules";
 
@@ -19,7 +20,7 @@ export default function Sidebar({ active, user }: { active: NavKey; user: Sessio
   const [open, setOpen] = useState(true);
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
-    window.location.href = "/login";
+    window.location.href = withBase("/login");
   }
   const initials = (user?.name || "?").trim().split(/\s+/).map((s) => s[0]).slice(0, 2).join("").toUpperCase();
 
@@ -28,7 +29,7 @@ export default function Sidebar({ active, user }: { active: NavKey; user: Sessio
       {/* logo */}
       <div className="px-5 pt-6">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/safestorage-logo.png" alt="SafeStorage" className="h-12 w-auto" />
+        <img src={withBase("/safestorage-logo.png")} alt="SafeStorage" className="h-12 w-auto" />
         <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400">Smart Transport · Ops</div>
       </div>
 
@@ -54,7 +55,7 @@ export default function Sidebar({ active, user }: { active: NavKey; user: Sessio
               return (
                 <a
                   key={n.key}
-                  href={n.href}
+                  href={withBase(n.href)}
                   className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
                     on ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                   }`}

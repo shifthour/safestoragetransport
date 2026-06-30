@@ -27,6 +27,17 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* The app is served under /safestorage-transport. Client code calls fetch("/api/…")
+            as if at root; this shim prefixes those absolute requests with the base path.
+            External (https://…) and already-prefixed URLs are left untouched. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){if(typeof window==="undefined")return;var b="/safestorage-transport";var f=window.fetch;window.fetch=function(u,o){try{if(typeof u==="string"&&u.charAt(0)==="/"&&u.charAt(1)!=="/"&&u.indexOf(b+"/")!==0){u=b+u;}}catch(e){}return f.call(this,u,o);};})();',
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

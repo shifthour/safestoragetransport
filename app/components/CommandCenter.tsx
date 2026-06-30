@@ -3,6 +3,7 @@
 import { CitySummary } from "@/lib/types";
 import { money, km, pct } from "@/lib/format";
 import { SessionUser } from "@/lib/auth";
+import { withBase } from "@/lib/base";
 import { Card, Bar } from "./ui";
 import AppShell from "./AppShell";
 
@@ -44,7 +45,7 @@ export default function CommandCenter({
         {dates.length > 0 && (
           <select
             defaultValue={activeDate}
-            onChange={(e) => { window.location.href = `/?src=admin&date=${e.currentTarget.value}`; }}
+            onChange={(e) => { window.location.href = withBase(`/?src=admin&date=${e.currentTarget.value}`); }}
             className="max-w-[55vw] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 sm:max-w-none"
           >
             {dates.map((d) => <option key={d.date} value={d.date}>{d.date} ({d.count})</option>)}
@@ -96,7 +97,7 @@ export default function CommandCenter({
                 {summaries.map((s) => (
                   <tr key={s.slug} className="border-t border-slate-100 hover:bg-slate-50">
                     <td className="px-3 py-2.5">
-                      <a href={`/?src=live&city=${s.slug}`} className="font-medium text-blue-600 hover:underline">{s.name}</a>
+                      <a href={withBase(`/?src=live&city=${s.slug}`)} className="font-medium text-blue-600 hover:underline">{s.name}</a>
                     </td>
                     <td className="px-3 py-2.5 text-slate-600">{s.orders} <span className="text-slate-400">· {s.pallets}p</span></td>
                     <td className="px-3 py-2.5 text-slate-600">{s.vehicles} <span className="text-slate-400">· {s.trips}t</span></td>
